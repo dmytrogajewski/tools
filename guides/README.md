@@ -143,6 +143,15 @@ The build scripts already use the right compiler and flags for every file
 [`toolchain/COMPILERS.md`](../toolchain/COMPILERS.md). Check it before
 diagnosing a near.
 
+## Never change what the retail code does
+
+The goal of this work is the retail game, bugs included: a function that
+behaves differently from the retail one is wrong here even when the retail one
+is the buggy one. When you find a bug, reproduce it and add it to
+`RETAIL_BUGS.md`. A fix goes behind `#ifdef NOLFSRC_MODERN`, with the retail
+code kept unchanged in the `#else` (see `BUILDING.md`, "Variant builds"), so
+the release build -- the only one that is scored -- still matches.
+
 ## Ground truth is `out/reference/`
 
 The retail binaries are extracted from disc 2 into `out/reference/` by
