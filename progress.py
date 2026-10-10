@@ -12,10 +12,22 @@ and classifies our reconstruction of each as:
   attempted  no match and no pairing, but there is evidence the address has
              been worked on (cited in src/, or recorded in progress/*.csv)
   todo       the shipped function has no counterpart in our sources yet
-  unplaced   (ours, not theirs) a function of ours whose bytes occur nowhere
-             in the image: not counted in either direction
+  unplaced   (ours, not theirs) a function of ours that our own link puts in
+             our image, but that no shipped function is placed for, even by
+             position (the join in _rows_for_image): WRITTEN BUT UNPLACED
+  unlinked   (ours) a function our own link leaves out of our image too:
+             compiled, but not part of this binary
+  driver     (ours) a function only a scoring driver (DRIVER_OBJS) emits
   crt        outside the image's app region (the static CRT/MFC): listed,
              not counted
+
+Coverage is the pair of counts summary.json carries per target: UNWRITTEN
+(todo + attempted: shipped functions with nothing of ours placed at them)
+and UNPLACED. Both at zero means every shipped function has a written,
+placed counterpart -- near or identical -- and nothing of ours is left
+over; tools/ratchet.py keeps either from going up (and `check --covered`
+requires both at zero). unplaced, unlinked and driver rows are ours, not
+shipped functions: none of them is in the denominator.
 
 Ground truth is always the SHIPPED binary, so the denominator can't drift.
 The engine images (lithtech.exe, server.dll, d3d.ren, NOLF.exe) come off the
@@ -40,7 +52,8 @@ tools/ratchet.py compares those with the recorded baseline in progress/.
 `make progress` runs both.
 
 Usage:
-  progress.py [--nears[=target]] [--todo|--attempted|--near|--small[=target]]
+  progress.py [--nears[=target]]
+              [--todo|--attempted|--near|--small|--unplaced|--unlinked|--driver[=target]]
 
 --nears prints the near-match worklist instead of the summary: one line per
 paired function with the shipped address, both sizes and the byte delta,
@@ -479,6 +492,75 @@ LINKED = {   # our whole-exe link, used as a second, unmasked oracle
     "NOLF.exe": "src/engine/launcher/Release/NOLF.exe",
 }
 
+# Our own link of each image: its .map says where each of our functions went,
+# which is what tells "written but not placed" (in our image, no shipped
+# address) from code our linker drops too (not in our image either), and
+# what the join in _rows_for_image places functions by.
+OUR_MAP = {
+    "NOLF.exe":     "src/engine/launcher/Release/NOLF.map",
+    "server.dll":   "src/engine/server/Release/server.map",
+    "lithtech.exe": "src/engine/lithtech/Release/lithtech.map",
+    "d3d.ren":      "src/engine/d3d/Release/d3d.map",
+    "CShell.dll":   "src/game/ClientShellDLL/Final_Release/CShell.map",
+    "Object.lto":   "src/game/ObjectDLL/Final_Release/Object.map",
+}
+
+
+# Translation units of ours that exist only to make the compiler emit
+# functions for the oracle to compare (sdkforce.cpp takes the address of
+# every SDK inline, so ALL of them are out of line in our link, whether or
+# not the shipped image has them so). Their functions are reported as
+# "driver": not shipped code, so neither placed nor missing.
+DRIVER_OBJS = {"sdkforce.obj"}
+
+
+def _our_layout(label):
+    """{(object, symbol): address} of the code in our linked image, from its
+    .map (object lower-cased, as an object file's basename), or None when
+    there is no map. Symbols the map lists twice (a static name in two
+    objects) are told apart by their object."""
+    m = OUR_MAP.get(label)
+    if not m or not os.path.exists(os.path.join(REPO, m)):
+        return None
+    out = {}
+    for line in open(os.path.join(REPO, m), errors="replace"):
+        p = line.split()
+        if len(p) < 4 or not p[0].startswith("0001:") or \
+                not re.fullmatch(r"[0-9a-fA-F]{8}", p[2]):
+            continue
+        obj = p[-1].split(":")[-1].lower()
+        out.setdefault((obj, p[1]), int(p[2], 16))
+    return out
+
+
+def _align(ours, theirs):
+    """Pair two runs of functions in order, by size: ours and theirs are
+    [(key, size)] in link order; the result is [(our key, their key)], each
+    pair within a factor of two in size, chosen to maximise the summed
+    agreement 1 - |ln(ratio)| (dynamic programming; either side may skip)."""
+    import math
+    n, m = len(ours), len(theirs)
+    best = [[0.0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n - 1, -1, -1):
+        for j in range(m - 1, -1, -1):
+            v = max(best[i + 1][j], best[i][j + 1])
+            su, sw = ours[i][1], theirs[j][1]
+            if su > 0 and sw > 0 and 0.5 <= su / sw <= 2:
+                v = max(v, 1 - abs(math.log(su / sw)) + best[i + 1][j + 1])
+            best[i][j] = v
+    out, i, j = [], 0, 0
+    while i < n and j < m:
+        su, sw = ours[i][1], theirs[j][1]
+        if su > 0 and sw > 0 and 0.5 <= su / sw <= 2 and \
+                abs(best[i][j] - (1 - abs(math.log(su / sw)) + best[i + 1][j + 1])) < 1e-9:
+            out.append((ours[i][0], theirs[j][0]))
+            i, j = i + 1, j + 1
+        elif best[i][j] == best[i + 1][j]:
+            i += 1
+        else:
+            j += 1
+    return out
+
 
 # Starts found BEHIND an identical match that is shorter than its row: see
 # rows_for_image. Consumed by _enum_with_sizes alongside extent-splits.csv.
@@ -504,6 +586,8 @@ def rows_for_image(label, exe_path, objs):
     extra = _remainders(label, exe_path, rows)
     if extra:
         _REMAINDER_STARTS[label] = extra
+        # the second pass records its own pairs: drop the first pass's
+        NEAR_PAIRS[:] = [r for r in NEAR_PAIRS if r[0] != label]
         rows = _rows_for_image(label, exe_path, objs)
     return rows
 
@@ -865,6 +949,8 @@ def _rows_for_image(label, exe_path, objs):
                 if all(i in mask or text[off + i] == code[i]
                        for i in range(end)):
                     small.add(a)
+                    placed_small.add(n)
+                    SMALL_SYMS[(label, a)] = n
                     break
 
     # A function we wrote that does not match still corresponds to a shipped
@@ -888,12 +974,15 @@ def _rows_for_image(label, exe_path, objs):
         return None
 
     paired = {}
+    occurs = {}        # symbol -> its bytes occur somewhere in the image
     rejected = 0
     if not from_lib is None:
         for n, (code, mask) in sorted(funcs.items()):
             if len(code) - len(mask) < 8 or n in from_lib:
                 continue
-            if list(find(text, tva, code, mask)):
+            occurs[n] = bool(list(find(text, tva, code, mask))) or bool(
+                n in unpadded and list(find(text, tva, *unpadded[n])))
+            if occurs[n]:
                 continue
             end = len(code)
             while end > 0 and code[end - 1] in (0x90, 0xCC):
@@ -958,12 +1047,259 @@ def _rows_for_image(label, exe_path, objs):
         print(f"  {label}: {rejected} candidate pairing(s) rejected on "
               f"argument-pop mismatch", file=sys.stderr)
 
+    # THE JOIN. The passes above pair by content, so a function we wrote
+    # whose bytes came out too different -- other registers, another block
+    # order, a member offset -- is left with no shipped address, and the
+    # shipped function it IS is left looking unwritten: one function, two
+    # rows, counted on both sides. Our image links the same objects in the
+    # same order as the shipped one (that is why the identical functions line
+    # up), so place such functions by POSITION instead: take every function
+    # already placed (identical, small or near) as an anchor -- its address
+    # in our link (our .map) beside its shipped address -- keep the longest
+    # chain of anchors whose order agrees in both images, and in each gap
+    # between two neighbouring anchors align our unplaced functions with the
+    # unpaired shipped ones in order, by size (_align: within a factor of
+    # two). A function placed this way is "near": written and placed, not
+    # yet identical.
+    layout = _our_layout(label)
+    ours_at = {}       # symbol -> our address
+    if layout:
+        for n in funcs:
+            if n in from_lib or ":" not in n:
+                continue
+            mod, sym = n.split(":", 1)
+            a = layout.get((mod.lower(), sym))
+            if a is not None:
+                ours_at[n] = a
+    placed_at = {}     # symbol -> shipped address
+    for (lb, a), n in PLACED_SYMS.items():
+        if lb == label and a in matched:
+            placed_at[n] = a
+    for (lb, a), n in SMALL_SYMS.items():
+        if lb == label and a in small:
+            placed_at[n] = a
+    for a, n in paired.items():
+        placed_at[n] = a
+    our_placed = {ours_at[n] for n in placed_at if n in ours_at}
+    # An inline function from a header is a COMDAT in every object that
+    # includes it, and every copy is the same function: the linker keeps one.
+    # Placing any copy places them all. Not so the names the compiler makes
+    # up per object -- `_$E12` (a global initializer) and the ??__E/??__F
+    # initializer/atexit thunks: the same name in two objects is two
+    # functions -- so those keep their object.
+    def fname(n):
+        mod, sym = n.split(":", 1)
+        return n if re.match(r"_?\$E|\?\?__[EF]", sym) else sym
+
+    placed_names = {fname(n) for n in placed_at if ":" in n}
+
+    def unplaced_sym(n):
+        """Ours, linked into our image, and placed nowhere in the shipped
+        one (nor folded, in our own link, onto a function that is)."""
+        if n in from_lib or n in placed_at or n not in ours_at or \
+                n.split(":", 1)[0].lower() in DRIVER_OBJS:
+            return False
+        if fname(n) in placed_names or ours_at[n] in our_placed:
+            return False
+        code, mask = funcs[n]
+        if len(code) - len(mask) < 8:
+            return n not in placed_small
+        return not occurs.get(n, True)
+
+    def body_len(code):
+        end = len(code)
+        while end > 0 and code[end - 1] in (0x90, 0xCC):
+            end -= 1
+        return len(strip_pad(bytes(code[:end]))) if label == "d3d.ren" else end
+
+    def chain_of(anchors):
+        """The longest run of (ours, shipped) anchors, in our order, whose
+        shipped addresses rise too."""
+        import bisect
+        anchors = sorted(anchors)
+        idx, prev = [], [-1] * len(anchors)
+        for k, (_o, r) in enumerate(anchors):
+            j = bisect.bisect_left([anchors[i][1] for i in idx], r)
+            if j > 0:
+                prev[k] = idx[j - 1]
+            if j == len(idx):
+                idx.append(k)
+            else:
+                idx[j] = k
+        out, k = [], idx[-1] if idx else -1
+        while k >= 0:
+            out.append(anchors[k])
+            k = prev[k]
+        return out[::-1]
+
+    if ours_at:
+        import bisect
+        free = {a for a in starts if in_app(label, a, lo, hi)
+                and a not in matched and a not in paired
+                and a not in small and sizes.get(a, 0) > 0}
+        joined = {"name": 0, "object": 0, "image": 0}
+
+        def place(n, a, how):
+            paired[a] = n
+            placed_at[n] = a
+            placed_names.add(fname(n))
+            free.discard(a)
+            NEAR_PAIRS.append((label, a, sizes.get(a, 0), n,
+                               body_len(funcs[n][0])))
+            joined[how] += 1
+
+        # 1. By name: a function named for the shipped address it was
+        # written as (`sub_<addr>`, d3d.ren's convention) is that function,
+        # however differently it compiled -- a partial rebuild of an 11 KB
+        # function can be half its size.
+        for n in sorted(funcs):
+            if not unplaced_sym(n):
+                continue
+            if label == "d3d.ren":
+                a = _own_addr(label, n, funcs)
+            else:
+                m = re.search(r"\bsub_([0-9a-f]{6,8})\b", n)
+                a = int(m.group(1), 16) if m else None
+            if a in free:
+                place(n, a, "name")
+
+        def mine_now(keep=lambda n: True):
+            out, seen = [], set()
+            for o, n in sorted((ours_at[n], n) for n in funcs
+                               if unplaced_sym(n) and keep(n)):
+                if fname(n) not in seen:            # one per function
+                    seen.add(fname(n))
+                    out.append((o, n))
+            return out
+
+        def align_gap(mine, o1, r1, o2, r2, how):
+            u = [(n, body_len(funcs[n][0])) for o, n in mine
+                 if o1 < o < o2 and n not in placed_at]
+            w = [(a, sizes[a]) for a in sorted(free) if r1 < a < r2]
+            if not u or not w or len(u) * len(w) > 250000:
+                return
+            for n, a in _align(u, w):
+                place(n, a, how)
+
+        # 2. Within each object, by neighbourhood: a shipped function no one
+        # is placed at, whose nearest placed neighbours (below or above) are
+        # functions of object X, is one of X's -- the linker lays an
+        # object's functions out together. Our own order within an object
+        # need not follow the shipped one (a reconstructed file is not laid
+        # out in Monolith's order: our commonphysics.obj's functions run in
+        # another order than the shipped ones), so X's unplaced functions
+        # are matched to those shipped ones by size, closest first, within
+        # a factor of two.
+        import math
+        owner = sorted((a, n.split(":", 1)[0]) for n, a in placed_at.items()
+                       if ":" in n)
+        owner_r = [a for a, _o in owner]
+        cand = {}
+        for a in sorted(free):
+            i = bisect.bisect_left(owner_r, a)
+            objs = set()
+            if i:
+                objs.add(owner[i - 1][1])
+            if i < len(owner):
+                objs.add(owner[i][1])
+            for obj in objs:
+                cand.setdefault(obj, []).append(a)
+        for obj, ws in sorted(cand.items()):
+            us = [n for _o, n in mine_now(
+                lambda n, obj=obj: n.split(":", 1)[0] == obj)]
+            pairs = []
+            for n in us:
+                su = body_len(funcs[n][0])
+                for a in ws:
+                    sw = sizes.get(a, 0)
+                    if su > 0 and sw > 0 and 0.5 <= su / sw <= 2:
+                        pairs.append((abs(math.log(su / sw)), n, a))
+            for _d, n, a in sorted(pairs):
+                if n not in placed_at and a in free:
+                    place(n, a, "object")
+
+        # 3. Across the image: what is left, between neighbouring anchors of
+        # any object in our whole link.
+        ch = [(-1, lo)] + chain_of((ours_at[n], a) for n, a in placed_at.items()
+                                   if n in ours_at) + [(1 << 40, hi)]
+        mine = mine_now()
+        for (o1, r1), (o2, r2) in zip(ch, ch[1:]):
+            align_gap(mine, o1, r1, o2, r2, "image")
+        if any(joined.values()):
+            print(f"  {label}: placed {joined['name']} by name, "
+                  f"{joined['object']} by object order, {joined['image']} by "
+                  f"link order", file=sys.stderr)
+
     rows = []
     # Functions we wrote source for that did NOT match: instruction-equivalent
     # near-matches, or code simply not linked into this image. Keyed by symbol
     # since we have no address for them.
     claimed = set(paired.values())
+    unplaced_named = set()
+
+    # The short functions (fewer than 8 unmasked bytes: `mov eax,8 / ret`,
+    # an initializer thunk that is one jmp) cannot be told apart: a dozen
+    # GetType()s return the same constant, so which shipped copy is whose is
+    # arbitrary, and placing them one by one leaves an arbitrary few over.
+    # For them coverage is a COUNT: of each exact shape, ours are short of
+    # the shipped image only by as many as we link more of than it has.
+    def shape(code, mask):
+        end = body_len(code)
+        return bytes(0 if i in mask else code[i] for i in range(end)), \
+            frozenset(i for i in mask if i < end)
+
+    short_over = {}    # shape -> how many of ours have no shipped copy
+    if ours_at:
+        mine_by_shape = {}
+        seen = set()
+        for n, (code, mask) in funcs.items():
+            if len(code) - len(mask) >= 8 or n in from_lib or \
+                    n not in ours_at or fname(n) in seen:
+                continue
+            seen.add(fname(n))
+            mine_by_shape.setdefault(shape(code, mask), []).append(n)
+        by_len = {}
+        for key in mine_by_shape:
+            by_len.setdefault(len(key[0]), []).append(key)
+        theirs_count = dict.fromkeys(mine_by_shape, 0)
+        for a in starts:
+            if not in_app(label, a, lo, hi):
+                continue
+            off = a - tva
+            body = text[off:off + sizes.get(a, 0)]
+            body = strip_pad(bytes(body)) if label == "d3d.ren" else \
+                bytes(body).rstrip(b"\x90\xcc")
+            for key in by_len.get(len(body), ()):
+                b, m = key
+                if all(i in m or body[i] == b[i] for i in range(len(b))):
+                    theirs_count[key] += 1
+        for key, ns in mine_by_shape.items():
+            # functions, not names: several names can share one address in
+            # our own link
+            n_ours = len({ours_at[n] for n in ns})
+            short_over[key] = max(0, n_ours - theirs_count[key])
+
     for n, (code, mask) in sorted(funcs.items()):
+        if n.split(":", 1)[0].lower() in DRIVER_OBJS and n not in claimed \
+                and n not in placed_at:
+            rows.append((label, n, len(code), "driver"))
+            continue
+        if ours_at and len(code) - len(mask) < 8 and n not in from_lib \
+                and unplaced_sym(n):
+            key = shape(code, mask)
+            if short_over.get(key, 0) > 0 and fname(n) not in unplaced_named:
+                short_over[key] -= 1
+                unplaced_named.add(fname(n))
+                rows.append((label, n, len(code), "unplaced"))
+            continue
+        if ours_at and unplaced_sym(n):
+            # written, linked into our image, and placed nowhere in the
+            # shipped one even by the join: WRITTEN BUT UNPLACED (once per
+            # function, however many objects carry a copy)
+            if fname(n) not in unplaced_named:
+                unplaced_named.add(fname(n))
+                rows.append((label, n, len(code), "unplaced"))
+            continue
         if len(code) - len(mask) < 8 or n in from_lib:
             # lib functions are scored in their own row; the linker drops the
             # ones this image never calls, and a dropped function is not a
@@ -982,8 +1318,10 @@ def _rows_for_image(label, exe_path, objs):
             # functions inflated the denominator by 1548 rows and made four
             # FINISHED libraries read 87-98% when they are at 100%: their
             # entire "near" column was this. Reported in its own column and
-            # excluded from funcs/bytes_total.
-            rows.append((label, n, len(code), "unplaced"))
+            # excluded from funcs/bytes_total -- as "unlinked" when our own
+            # link leaves it out too (or there is no map to say).
+            rows.append((label, n, len(code),
+                         "unlinked" if ours_at else "unplaced"))
     for a in sorted(set(starts) | set(matched)):
         size = matched.get(a, sizes.get(a, 0))
         if a in matched:
@@ -1321,7 +1659,8 @@ def main():
     # worklist.
     want_cls = None
     for a in sys.argv[1:]:
-        for cls in ("todo", "attempted", "near", "small"):
+        for cls in ("todo", "attempted", "near", "small", "unplaced",
+                    "unlinked", "driver"):
             if a == "--" + cls or a.startswith("--" + cls + "="):
                 want_cls = cls
     if want_cls:
@@ -1370,15 +1709,21 @@ def main():
                                        "attempted": 0,
                                        "small": 0, "crt": 0, "crt_bytes": 0,
                                        "unplaced": 0, "unplaced_bytes": 0,
+                                       "unlinked": 0, "unlinked_bytes": 0,
+                                       "driver": 0, "driver_bytes": 0,
+                                       "unwritten": 0, "unwritten_bytes": 0,
                                        "bytes_identical": 0, "bytes_total": 0,
                                        "funcs": 0})
         t[status] += 1
         if status == "crt":          # toolchain code: visible, not a target
             t["crt_bytes"] += size
             continue
-        if status == "unplaced":     # our code, not in THIS image: not a
-            t["unplaced_bytes"] += size    # shipped function, so not a
-            continue                       # denominator either
+        if status in ("unplaced", "unlinked", "driver"):  # ours, no shipped
+            t[status + "_bytes"] += size        # address: not a shipped
+            continue                            # function, not a denominator
+        if status in ("todo", "attempted"):     # nothing of ours placed there
+            t["unwritten"] += 1
+            t["unwritten_bytes"] += size
         t["funcs"] += 1
         t["bytes_total"] += size
         if status == "identical":
@@ -1392,6 +1737,7 @@ def main():
     tot = {"identical": 0, "near": 0, "todo": 0, "attempted": 0,
            "small": 0, "funcs": 0,
            "unplaced": 0, "unplaced_bytes": 0,
+           "unwritten": 0, "unwritten_bytes": 0,
            "bytes_identical": 0, "bytes_total": 0}
     for label, t in targets.items():
         if t["started"]:
@@ -1405,8 +1751,9 @@ def main():
 
     print(f"{'target':<18} {'ident':>6} {'near':>5} {'small':>6} "
           f"{'attem':>6} {'todo':>5} "
-          f"{'funcs':>6} {'unpl':>5} {'bytes id':>10} {'bytes tot':>10}  {'%':>5}")
-    print("-" * 99)
+          f"{'funcs':>6} {'unwr':>5} {'unpl':>5} {'bytes id':>10} "
+          f"{'bytes tot':>10}  {'%':>5}")
+    print("-" * 105)
     order = ([l for l, _ in LIBS] if libdir else []) + ["NOLF.exe"] + \
             [l for l, _ in ENGINE if l in targets and targets[l]["started"]] + \
             [g[0] for g in GAME]
@@ -1417,7 +1764,7 @@ def main():
         pct = 100 * t["bytes_identical"] / max(t["bytes_total"], 1)
         print(f"{label:<18} {t['identical']:>6} {t['near']:>5} {t['small']:>6} "
               f"{t.get('attempted', 0):>6} {t['todo']:>5} "
-              f"{t['funcs']:>6} {t.get('unplaced', 0):>5} "
+              f"{t['funcs']:>6} {t['unwritten']:>5} {t['unplaced']:>5} "
               f"{t['bytes_identical']:>10} "
               f"{t['bytes_total']:>10}  {pct:>4.1f}%")
     r = targets.get(GAME_RES[0])
@@ -1425,15 +1772,15 @@ def main():
         pct = 100 * r["bytes_identical"] / max(r["bytes_total"], 1)
         print(f"{GAME_RES[0]:<18} {r['identical']:>6} {r['near']:>5} "
               f"{r['small']:>6} {r.get('attempted', 0):>6} {r['todo']:>5} "
-              f"{r['funcs']:>6} {r.get('unplaced', 0):>5} "
+              f"{r['funcs']:>6} {r['unwritten']:>5} {r['unplaced']:>5} "
               f"{r['bytes_identical']:>10} {r['bytes_total']:>10}  {pct:>4.1f}%"
               "  (resources, not code: not in ALL)")
-    print("-" * 99)
+    print("-" * 105)
     pct = 100 * tot["bytes_identical"] / max(tot["bytes_total"], 1)
     print(f"{'ALL':<18} {tot['identical']:>6} {tot['near']:>5} "
           f"{tot['small']:>6} {tot.get('attempted', 0):>6} {tot['todo']:>5} "
           f"{tot['funcs']:>6} "
-          f"{tot['unplaced']:>5} "
+          f"{tot['unwritten']:>5} {tot['unplaced']:>5} "
           f"{tot['bytes_identical']:>10} {tot['bytes_total']:>10}  {pct:>4.1f}%")
     if not libdir:
         print("(the lithshared libraries are not included: NOLF_SOURCE is not set)")
