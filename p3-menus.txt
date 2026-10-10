@@ -1,0 +1,63 @@
+# p3-menus.txt -- input script for the menus at any resolution (MODERN.md,
+# P3): walks the main menu, Options (Game, Controls and, in the modern
+# build, Interface; not Display, whose mode change on leaving fails under
+# Xvfb), Single player (mission select) and Multiplayer (player setup,
+# host, join), with a screenshot of each. Menu items are clicked at their
+# 640x480 layout positions ("mclick x y"), which the runner maps to the
+# window for the build being tested. Start without a world:
+#   PLAYTEST_RES=1280x720 PLAYTEST_MAP=modern PLAYTEST_SCRIPT=tools/p3-menus.txt \
+#       tools/playtest.sh out/game-modern -
+# (PLAYTEST_MAP=retail, the default, for the release build.)
+window 180
+wait 25
+shot main
+mclick 100 254
+wait 3
+shot options
+mclick 100 254
+wait 3
+shot game-options
+key Escape
+wait 3
+mclick 100 216
+wait 3
+shot controls
+key Escape
+wait 3
+key Escape
+wait 3
+mclick 100 158
+wait 3
+shot single
+mclick 100 160
+wait 3
+shot mission
+key Escape
+wait 3
+key Escape
+wait 3
+mclick 100 222
+wait 3
+shot multi
+mclick 100 110
+wait 4
+shot player
+key Escape
+wait 3
+mclick 100 170
+wait 3
+shot host
+key Escape
+wait 3
+mclick 100 130
+wait 4
+shot join
+key Escape
+wait 3
+key Escape
+wait 3
+mclick 100 254
+wait 3
+mclick 100 300
+wait 3
+shot interface
