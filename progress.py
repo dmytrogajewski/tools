@@ -19,14 +19,18 @@ and classifies our reconstruction of each as:
 
 Ground truth is always the SHIPPED binary, so the denominator can't drift.
 The engine images (lithtech.exe, server.dll, d3d.ren, NOLF.exe) come off the
-disc into out/reference/ (`tools/discextract.py reference`); the seven
+disc into out/reference/ (`tools/discextract.py reference`), and so do the
+Game of the Year game DLLs (CShell.dll, Object.lto, CRes.dll, out of
+NOLFGOTY.REZ); CRes.dll holds no code of Monolith's, so it is scored
+resource by resource instead (rows_for_resources); the seven
 lithshared libraries are compared per COFF symbol against Monolith's prebuilt
 .libs from the NOLF Source Code v1.003 release, found through $NOLF_SOURCE
 and checked against progress/shipped-libs.sha256. Without NOLF_SOURCE the
 libraries are left out and only the images are scored.
 
-What is compared is what the build left in the tree: src/engine/*/Release/
-and src/lithshared/out/. Run `make` first.
+What is compared is what the build left in the tree: src/engine/*/Release/,
+src/game/*/Final_Release/ (CRes.dll: src/game/ClientRes/Release/) and
+src/lithshared/out/. Run `make` first.
 
 Outputs (under out/progress/):
   functions.csv   one row per shipped function: target, name, size, status
@@ -145,6 +149,23 @@ ENGINE = [
     ("server.dll",   REFERENCE + "/server.dll"),
 ]
 
+# The game DLLs, built from Monolith's source release (src/game/, Final
+# Release: build/build.sh all final) and scored against the Game of the Year
+# copies in NOLFGOTY.REZ: (label, shipped image, our objects' directory, the
+# lithshared libraries it links, which are ours too -- as StdLith.lib in
+# server.dll).
+GAME = [
+    ("CShell.dll", REFERENCE + "/CShell.dll", "src/game/ClientShellDLL/Final_Release",
+     ["StdLith", "CryptMgr", "ltguimgr_LT2", "MFCStub", "ButeMgrNoMFC",
+      "GameSpyClientMgr", "RegMgr", "LithFontMgr_LT2"]),
+    ("Object.lto", REFERENCE + "/Object.lto", "src/game/ObjectDLL/Final_Release",
+     ["StdLith", "CryptMgr", "MFCStub", "ButeMgrNoMFC", "GameSpyMgr", "RegMgr"]),
+]
+# CRes.dll: string tables, dialogs, bitmaps and text, and nothing but the
+# CRT's DLL entry code -- so its resources are what is scored.
+GAME_RES = ("CRes.dll", REFERENCE + "/CRes.dll", "src/game/ClientRes/Release/CRes.dll")
+GAME_LABELS = {g[0] for g in GAME} | {GAME_RES[0]}
+
 # Monolith's own code within each image. Everything above these ranges is the
 # statically linked CRT (and MFC in NOLF.exe's case) — real code in the binary,
 # but supplied by the toolchain, so it is NOT a reconstruction target. Counting
@@ -203,6 +224,28 @@ APP_REGION = {
     # always refused to count; the boundary now says so in the denominator too.
     "lithtech.exe": (0x401000, 0x4928bf),
     "d3d.ren":      (0x10001000, 0x1007fa91),
+    # The game DLLs link like server.dll: Monolith's objects, then the
+    # lithshared libraries (StdLith, CryptMgr, ltguimgr_LT2, MFCStub,
+    # ButeMgrNoMFC, the GameSpy library, RegMgr), then the static CRT, which
+    # begins with libcimt.lib (the iostream classes) and goes on into
+    # libcmt.lib. Found by taking every function of 24+ bytes in our own
+    # linked image from the libraries and the CRT (our .map says which),
+    # masking our relocations, and searching the retail .text for it: each
+    # group's unique hits form one run, in our link order. libcimt's first
+    # function is the same 43-byte function in both images (ifstream's,
+    # just below ifstream::close, the group's first unique hit):
+    #   CShell.dll: libcimt 0x100edab0 (close at 0x100edbd3), libcmt from
+    #     0x100efd1b (??_M, our first libcmt function) to _findenv
+    #     0x100fd769; above the libraries, ButeMgrNoMFC ends at
+    #     ??3zSLink 0x100eb600 and GameSpyClientMgr is at 0x100eb6d0.
+    #   Object.lto: libcimt 0x10141db0 (close at 0x10141ed3), libcmt from
+    #     __cfltcvt_init 0x1014412f to __decomp 0x1015030e; RegMgr, the
+    #     last library, ends at 0x10141d70 + 50 bytes.
+    # The GameSpy library stays in the region: the retail one is the
+    # GameSpy SDK, which src/lithshared/gamespy/ stands in for and will not
+    # match, so those functions are honestly "todo".
+    "CShell.dll":   (0x10001000, 0x100edab0),
+    "Object.lto":   (0x10001000, 0x10141db0),
 }
 
 
@@ -231,9 +274,21 @@ APP_REGION = {
 #     an IAT jump thunk at 0x4a03be below it, __ehvec_ctor at 0x4a0620
 #     above. (baselist.obj was pulled earlier here, into the app region at
 #     0x0048de30..0x0048df0f.)
+#   CShell.dll 0x100fd930..0x1010086f: LithFontMgr_LT2.lib, linked after
+#     the CRT exactly as in our CShell.dll (our map: LithFontMgr_LT2 between
+#     LIBCMT and __strupr). Its 29 unique hits run 0x100fda40 (LithFont's
+#     constructor) .. 0x10100760 (LithBitmapFont::ClipFont, 250 bytes);
+#     below it an import thunk (jmp [0x101080dc] at 0x100fd920, then int3
+#     padding), above it, after a 4-byte nop-padded accessor at 0x10100860,
+#     libcmt's __strupr at 0x10100870 (the same bytes as ours).
+#   Object.lto 0x101503e0..0x101503ff: MFCStub's CRect::CRect(l, t, r, b)
+#     (32 bytes, ret 0x10), linked after the CRT as in our Object.lto: an
+#     import thunk at 0x101503d0 below it, CRT code from 0x10150400.
 APP_ISLANDS = {
     "server.dll": [(0x1004bb20, 0x1004bdd0)],
     "lithtech.exe": [(0x004a03d0, 0x004a0620)],
+    "CShell.dll": [(0x100fd930, 0x10100870)],
+    "Object.lto": [(0x101503e0, 0x10150400)],
 }
 
 
@@ -387,6 +442,8 @@ _EXCLUDE_IMAGE = {
 
 def _exclude_files(label):
     """The screen-exclude files whose rows apply to image `label`."""
+    if label in GAME_LABELS:
+        return []          # every one of them is about an engine image
     out = []
     for f in sorted(glob.glob(DATA + "/*-screen-exclude.csv")):
         prefix = os.path.basename(f)[:-len("-screen-exclude.csv")]
@@ -946,6 +1003,69 @@ def _rows_for_image(label, exe_path, objs):
     return rows
 
 
+def _resources(path):
+    """{(type, name, language): data} of a PE image's resources."""
+    d = open(path, "rb").read()
+    pe = struct.unpack_from("<I", d, 0x3C)[0]
+    nsec = struct.unpack_from("<H", d, pe + 6)[0]
+    optsz = struct.unpack_from("<H", d, pe + 20)[0]
+    rva = struct.unpack_from("<I", d, pe + 24 + 96 + 2 * 8)[0]
+    secs = []
+    for i in range(nsec):
+        s = pe + 24 + optsz + i * 40
+        vs, va, rs, rp = struct.unpack_from("<IIII", d, s + 8)
+        secs.append((va, max(vs, rs), rp))
+
+    def off(r):
+        for va, sz, rp in secs:
+            if va <= r < va + sz:
+                return r - va + rp
+        raise ValueError("resource RVA 0x%x outside every section" % r)
+
+    base = off(rva)
+
+    def name(v):
+        if v & 0x80000000:
+            o = base + (v & 0x7FFFFFFF)
+            n = struct.unpack_from("<H", d, o)[0]
+            return d[o + 2:o + 2 + 2 * n].decode("utf-16-le")
+        return v
+
+    def walk(o, path):
+        out = {}
+        n = sum(struct.unpack_from("<HH", d, o + 12))
+        for i in range(n):
+            nm, ptr = struct.unpack_from("<II", d, o + 16 + 8 * i)
+            key = path + (name(nm),)
+            if ptr & 0x80000000:
+                out.update(walk(base + (ptr & 0x7FFFFFFF), key))
+            else:
+                drva, dsz = struct.unpack_from("<II", d, base + ptr)
+                out[key] = d[off(drva):off(drva) + dsz]
+        return out
+
+    return walk(base, ())
+
+
+def rows_for_resources(label, shipped, ours):
+    """A resource-only image: one row per shipped resource, `type/name/lang`,
+    sized by its data. identical = our resource has the same bytes; near =
+    we have it, but its bytes differ; todo = we have none by that key."""
+    theirs = _resources(shipped)
+    mine = _resources(ours) if os.path.exists(ours) else {}
+    rows = []
+    for key in sorted(theirs, key=str):
+        data = theirs[key]
+        if key not in mine:
+            status = "todo"
+        elif mine[key] == data:
+            status = "identical"
+        else:
+            status = "near"
+        rows.append((label, "rsrc:" + "/".join(str(k) for k in key), len(data), status))
+    return rows
+
+
 def calltarget_starts(path):
     """Function starts for a symbol-less PE: call rel32 targets + exports.
 
@@ -1078,6 +1198,14 @@ def _cited_addrs():
 def _touched_index(label=None):
     if label in _TOUCHED:
         return _TOUCHED[label]
+    # The game DLLs are built from Monolith's own source, which cites no
+    # retail address; the addresses src/engine/ cites are the engine
+    # images', and server.dll's and d3d.ren's share the game DLLs' range
+    # (0x10000000+), so counting them here would mark game functions
+    # "attempted" by coincidence.
+    if label in GAME_LABELS:
+        _TOUCHED[label] = set()
+        return _TOUCHED[label]
     addrs = set(_cited_addrs())
     for extra in glob.glob(DATA + "/*-decoded-map.csv") + \
                  _exclude_files(label):
@@ -1104,7 +1232,8 @@ def main():
 
     # A missing reference image would silently drop its target from the
     # totals; refuse instead.
-    missing = [n for n in ("NOLF.exe", "lithtech.exe", "server.dll", "d3d.ren")
+    missing = [n for n in ("NOLF.exe", "lithtech.exe", "server.dll", "d3d.ren",
+                           "CShell.dll", "Object.lto", "CRes.dll")
                if not os.path.exists(os.path.join(REFERENCE, n))]
     if missing:
         sys.exit("progress.py: %s missing from %s/ -- run `make progress`, or "
@@ -1114,6 +1243,8 @@ def main():
     unbuilt = [d for d in ("src/engine/launcher", "src/engine/server",
                            "src/engine/lithtech", "src/engine/d3d")
                if not glob.glob(d + "/Release/*.obj")] + \
+              [g[2] for g in GAME if not glob.glob(g[2] + "/*.obj")] + \
+              [GAME_RES[2]] * (not os.path.exists(GAME_RES[2])) + \
               [p for _l, p in LIBS if not os.path.exists(p)]
     if unbuilt:
         sys.exit("progress.py: no build output in %s -- run `make` first"
@@ -1173,6 +1304,17 @@ def main():
             started.add(label)
         elif os.path.exists(path):
             all_rows += rows_for_engine(label, path)
+
+    # the game DLLs: our objects plus the lithshared libraries each links
+    for label, path, objdir, libs in GAME:
+        objs = sorted(glob.glob(objdir + "/*.obj")) + \
+            ["src/lithshared/out/%s.lib" % l for l in libs
+             if os.path.exists("src/lithshared/out/%s.lib" % l)]
+        all_rows += rows_for_image(label, path, objs)
+        started.add(label)
+    # scored, but not "started": resource data is not code, so it stays out
+    # of the total (and the README lists it below it)
+    all_rows += rows_for_resources(*GAME_RES)
 
     # --todo[=<target>] (or --attempted, --near, --small): the rows of one
     # status. The table gives a number and the number alone is not a
@@ -1266,7 +1408,8 @@ def main():
           f"{'funcs':>6} {'unpl':>5} {'bytes id':>10} {'bytes tot':>10}  {'%':>5}")
     print("-" * 99)
     order = ([l for l, _ in LIBS] if libdir else []) + ["NOLF.exe"] + \
-            [l for l, _ in ENGINE if l in targets and targets[l]["started"]]
+            [l for l, _ in ENGINE if l in targets and targets[l]["started"]] + \
+            [g[0] for g in GAME]
     for label in order:
         if label not in targets:
             continue
@@ -1277,6 +1420,14 @@ def main():
               f"{t['funcs']:>6} {t.get('unplaced', 0):>5} "
               f"{t['bytes_identical']:>10} "
               f"{t['bytes_total']:>10}  {pct:>4.1f}%")
+    r = targets.get(GAME_RES[0])
+    if r:
+        pct = 100 * r["bytes_identical"] / max(r["bytes_total"], 1)
+        print(f"{GAME_RES[0]:<18} {r['identical']:>6} {r['near']:>5} "
+              f"{r['small']:>6} {r.get('attempted', 0):>6} {r['todo']:>5} "
+              f"{r['funcs']:>6} {r.get('unplaced', 0):>5} "
+              f"{r['bytes_identical']:>10} {r['bytes_total']:>10}  {pct:>4.1f}%"
+              "  (resources, not code: not in ALL)")
     print("-" * 99)
     pct = 100 * tot["bytes_identical"] / max(tot["bytes_total"], 1)
     print(f"{'ALL':<18} {tot['identical']:>6} {tot['near']:>5} "

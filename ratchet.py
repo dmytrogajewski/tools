@@ -46,6 +46,14 @@ ROWS = [
     ("`d3d.ren`", "the Direct3D renderer", ["d3d.ren"]),
     ("`NOLF.exe`", "the launcher", ["NOLF.exe"]),
     ("lithshared", "the seven shared libraries", LIBS),
+    ("`CShell.dll`", "the game: client", ["CShell.dll"]),
+    ("`Object.lto`", "the game: server objects", ["Object.lto"]),
+]
+# Rows listed after ROWS but left out of the total: a resource-only image,
+# scored resource by resource (tools/progress.py, rows_for_resources). Its
+# data is not code, so it is not added to the total.
+RES_ROWS = [
+    ("`CRes.dll`", "the game's resources", ["CRes.dll"]),
 ]
 
 
@@ -101,6 +109,14 @@ def render(summary):
             tot[k] += agg[k]
         out.append(
             f"| {label} | {what} | {agg['identical']:,} / {agg['funcs']:,} | "
+            f"{agg['bytes_identical']:,} / {agg['bytes_total']:,} bytes | "
+            f"`{bar(agg['bytes_identical'], agg['bytes_total'])}` "
+            f"{pct_floor(agg['bytes_identical'], agg['bytes_total'])}% |")
+    for label, what, names in RES_ROWS:
+        agg = {k: sum(t[n][k] for n in names) for k in tot}
+        out.append(
+            f"| {label} | {what}, not in the total | {agg['identical']:,} / "
+            f"{agg['funcs']:,} resources | "
             f"{agg['bytes_identical']:,} / {agg['bytes_total']:,} bytes | "
             f"`{bar(agg['bytes_identical'], agg['bytes_total'])}` "
             f"{pct_floor(agg['bytes_identical'], agg['bytes_total'])}% |")

@@ -9,8 +9,9 @@
   discextract.py goty       <isodir> <outdir>    the Game of the Year text
                                                  our CRes.dll is built with,
                                                  out of the retail one
-  discextract.py reference  <isodir> <refdir>    the retail engine images,
-                                                 for scoring only
+  discextract.py reference  <isodir> <refdir>    the retail engine images
+                                                 and game DLLs, for scoring
+                                                 only
   discextract.py audit      <gamedir>            every PE file in a game
                                                  directory, with its origin
 
@@ -49,7 +50,8 @@ resources are the retail ones. The retail DLL is read in memory, never
 written anywhere or run; the text stays out of this repository.
 
 `reference` copies the retail lithtech.exe, server.dll, d3d.ren, NOLF.exe and
-ltmsg.dll to a reference directory (build/reference.sh: out/reference/). They
+ltmsg.dll, and the Game of the Year CShell.dll, Object.lto and CRes.dll out of
+NOLFGOTY.REZ, to a reference directory (build/reference.sh: out/reference/). They
 are what tools/progress.py, `build/engine.sh ... verify` and the
 reconstruction tools compare our objects against; the build never reads
 them, and nothing in that directory is ever run or goes into a game
@@ -89,6 +91,15 @@ THIRD_PARTY_EXTS = {".flt", ".m3d", ".asi", ".as6"}
 
 # The retail images the checks compare against (`reference`).
 REFERENCE = ["lithtech.exe", "server.dll", "d3d.ren", "NOLF.exe", "ltmsg.dll"]
+# ... and the retail game DLLs, which the discs only hold inside the .rez
+# archives (the game loads them from there). There are three generations:
+# NOLF2.REZ has the original release's, nolfu003.rez the 1.003 update's, and
+# NOLFGOTY.REZ the Game of the Year Edition's -- the copies the GOTY install
+# runs (it is last in the rez stack) and the ones our build replaces.
+# Monolith's source release builds the GOTY ones: scored against each,
+# Object.lto has 89% of its bytes identical to GOTY's and 55% to 1.003's.
+REFERENCE_GAME = [("CSHELL.dll", "CShell.dll"), ("OBJECT.lto", "Object.lto"),
+                  ("CRES.dll", "CRes.dll")]
 
 # Configs the build writes itself rather than copying (see build/all.sh).
 NOT_COPIED = {"autoexec.cfg"}
@@ -443,6 +454,19 @@ def cmd_reference(isodir, refdir):
         dest = refdir / name
         d.copy(p, dest)
         print(f"== {DISC2}:{p} -> {dest}")
+    from rezextract import Rez
+    d = Disc(isodir, DISC1)
+    p = d.find("Data/NOLFGOTY.REZ")
+    ext, sz = d.files[p]
+    rez = Rez(_Window(d.iso.f, ext * 2048, sz))
+    found = {path.lower(): (pos, size) for path, pos, size in rez.walk()}
+    for name, out in REFERENCE_GAME:
+        if name.lower() not in found:
+            sys.exit(f"discextract: no {name} in {DISC1}:{p}")
+        pos, size = found[name.lower()]
+        rez.f.seek(pos)
+        (refdir / out).write_bytes(rez.f.read(size))
+        print(f"== {DISC1}:{p}:{name} -> {refdir / out}")
 
 
 def cmd_audit(gamedir):
