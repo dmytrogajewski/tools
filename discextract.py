@@ -36,10 +36,12 @@ of the retail NOLF.exe on the disc (the image is parsed in memory, never
 written anywhere or run) and written back as the .bmp / .pal / .wav / .ico
 / .cur files rc.exe compiles into our NOLF.exe.
 
-`reference` copies the retail lithtech.exe, server.dll, d3d.ren and NOLF.exe
-to a reference directory (`make progress`: out/reference/). They are what
-tools/progress.py scores our objects against; the build never reads them,
-and nothing in that directory is ever run or goes into a game directory.
+`reference` copies the retail lithtech.exe, server.dll, d3d.ren, NOLF.exe and
+ltmsg.dll to a reference directory (build/reference.sh: out/reference/). They
+are what tools/progress.py, `build/engine.sh ... verify` and the
+reconstruction tools compare our objects against; the build never reads
+them, and nothing in that directory is ever run or goes into a game
+directory.
 
 Every file the steps write is recorded in <gamedir>/MANIFEST.txt
 (`<origin>\\t<path>`); build/all.sh adds the binaries it built, and `audit`
@@ -73,8 +75,8 @@ REZ = [
 THIRD_PARTY_NAMES = {"mss32.dll", "binkw32.dll"}
 THIRD_PARTY_EXTS = {".flt", ".m3d", ".asi", ".as6"}
 
-# The retail images tools/progress.py scores against (`reference`).
-REFERENCE = ["lithtech.exe", "server.dll", "d3d.ren", "NOLF.exe"]
+# The retail images the checks compare against (`reference`).
+REFERENCE = ["lithtech.exe", "server.dll", "d3d.ren", "NOLF.exe", "ltmsg.dll"]
 
 # Configs the build writes itself rather than copying (see build/all.sh).
 NOT_COPIED = {"autoexec.cfg"}
