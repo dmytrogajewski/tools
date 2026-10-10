@@ -6,6 +6,8 @@
   discextract.py launcherres <isodir> <resdir>   the launcher's art and
                                                  sound, out of the retail
                                                  NOLF.exe's resources
+  discextract.py reference  <isodir> <refdir>    the retail engine images,
+                                                 for scoring only
   discextract.py audit      <gamedir>            every PE file in a game
                                                  directory, with its origin
 
@@ -33,6 +35,11 @@ they are not in this repository: they are read out of the resource section
 of the retail NOLF.exe on the disc (the image is parsed in memory, never
 written anywhere or run) and written back as the .bmp / .pal / .wav / .ico
 / .cur files rc.exe compiles into our NOLF.exe.
+
+`reference` copies the retail lithtech.exe, server.dll, d3d.ren and NOLF.exe
+to a reference directory (`make progress`: out/reference/). They are what
+tools/progress.py scores our objects against; the build never reads them,
+and nothing in that directory is ever run or goes into a game directory.
 
 Every file the steps write is recorded in <gamedir>/MANIFEST.txt
 (`<origin>\\t<path>`); build/all.sh adds the binaries it built, and `audit`
@@ -65,6 +72,9 @@ REZ = [
 # may be a binary.
 THIRD_PARTY_NAMES = {"mss32.dll", "binkw32.dll"}
 THIRD_PARTY_EXTS = {".flt", ".m3d", ".asi", ".as6"}
+
+# The retail images tools/progress.py scores against (`reference`).
+REFERENCE = ["lithtech.exe", "server.dll", "d3d.ren", "NOLF.exe"]
 
 # Configs the build writes itself rather than copying (see build/all.sh).
 NOT_COPIED = {"autoexec.cfg"}
@@ -315,6 +325,17 @@ def cmd_launcherres(isodir, resdir):
     print(f"== {DISC2}:{p} resources -> {resdir}/ ({', '.join(out)})")
 
 
+def cmd_reference(isodir, refdir):
+    refdir = Path(refdir)
+    refdir.mkdir(parents=True, exist_ok=True)
+    d = Disc(isodir, DISC2)
+    for name in REFERENCE:
+        p = d.find(f"Game/{name}")
+        dest = refdir / name
+        d.copy(p, dest)
+        print(f"== {DISC2}:{p} -> {dest}")
+
+
 def cmd_audit(gamedir):
     gamedir = Path(gamedir)
     man = Manifest(gamedir)
@@ -357,6 +378,8 @@ def main():
         cmd_thirdparty(sys.argv[2], sys.argv[3])
     elif cmd == "launcherres" and len(sys.argv) == 4:
         cmd_launcherres(sys.argv[2], sys.argv[3])
+    elif cmd == "reference" and len(sys.argv) == 4:
+        cmd_reference(sys.argv[2], sys.argv[3])
     elif cmd == "audit" and len(sys.argv) == 3:
         sys.exit(cmd_audit(sys.argv[2]))
     else:
