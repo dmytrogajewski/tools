@@ -15,7 +15,12 @@ applies it to the data the build already took from the discs:
                                  the GOTY archives override, under a new name)
   src/modern/data/files/<path>   a new file, written for this project,
                                  installed as-is at <path>
-  src/modern/data/gamedir/...    the same three kinds, for files the engine
+  src/modern/data/<path>.bytes   byte edits of a binary retail file (e.g. a
+                                 palette entry of a .pcx): one edit per line,
+                                 "<offset> <old hex> <new hex>", the offset
+                                 in hex or decimal and negative to count
+                                 from the end; the old bytes must match
+  src/modern/data/gamedir/...    the same four kinds, for files the engine
                                  reads from the game directory itself rather
                                  than from the rez archives (defctrls.cfg):
                                  a .patch applies to the game directory's
@@ -122,6 +127,29 @@ def apply_patch(text, patch, name):
     return res.replace("\n", "\r\n") if crlf else res
 
 
+def apply_bytes(raw, recipe, name):
+    """Apply a .bytes recipe: "<offset> <old hex> <new hex>" per line."""
+    data = bytearray(raw)
+    for n, line in enumerate(open(recipe).read().split("\n"), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        f = line.split()
+        if len(f) != 3:
+            sys.exit(f"moddata: {name}: line {n}: expected \"<offset> <old hex> <new hex>\"")
+        off = int(f[0], 0)
+        old, new = bytes.fromhex(f[1]), bytes.fromhex(f[2])
+        if len(old) != len(new):
+            sys.exit(f"moddata: {name}: line {n}: old and new differ in length")
+        if off < 0:
+            off += len(data)
+        if off < 0 or data[off:off + len(old)] != old:
+            sys.exit(f"moddata: {name}: line {n}: the retail bytes do not match "
+                     f"-- the recipe is out of date")
+        data[off:off + len(new)] = new
+    return bytes(data)
+
+
 def recipes(rdir):
     """(target, game path, kind, recipe file) for every recipe; target is
     "custom" or "gamedir"."""
@@ -139,6 +167,8 @@ def recipes(rdir):
                 out.append((target, rel[:-len(".patch")], "patch", p))
             elif f.endswith(".from"):
                 out.append((target, rel[:-len(".from")], "from", p))
+            elif f.endswith(".bytes"):
+                out.append((target, rel[:-len(".bytes")], "bytes", p))
     return sorted(out)
 
 
@@ -180,9 +210,12 @@ def cmd_apply(gamedir, rdir):
                 raw, real = data.read(path)
             if raw is None:
                 sys.exit(f"moddata: {path}: no retail file to patch")
-            text = raw.decode("latin-1")
-            content = apply_patch(text, open(recipe, encoding="latin-1").read(),
-                                  path).encode("latin-1")
+            if kind == "bytes":
+                content = apply_bytes(raw, recipe, path)
+            else:
+                text = raw.decode("latin-1")
+                content = apply_patch(text, open(recipe, encoding="latin-1").read(),
+                                      path).encode("latin-1")
         root = gamedir if target == "gamedir" else custom
         dest = os.path.join(root, real)
         os.makedirs(os.path.dirname(dest), exist_ok=True)

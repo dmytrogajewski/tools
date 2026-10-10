@@ -1,0 +1,78 @@
+# p4-jukebox.txt -- playtest script for the modern build's jukebox (M-P4-02):
+#   PLAYTEST_SCRIPT=tools/p4-jukebox.txt PLAYTEST_NAME=p4-jukebox \
+#       tools/playtest.sh out/game-modern 'Worlds\T01S01'
+# From the game: Escape -> Options -> Jukebox, play a piece of the first
+# theme, then one of the last (Game of the Year) theme, leave the jukebox and
+# go back to the game. Keyboard only.
+# The build container has no sound card, so CMusic finds no DirectMusic and
+# the jukebox says it cannot play; give ALSA a null device to get the real
+# path ("Now playing: ..."), e.g. add to the docker command line
+#   -v <file containing: pcm.!default { type null }>:/etc/asound.conf:ro
+window 180
+wait 15
+skipcine 90
+shot play
+key Escape
+wait 2
+shot escape-menu
+# Resume -> Load -> Save -> Options
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Return
+wait 2
+shot options
+# Display, Sound, Controls, Game, Performance, Jukebox
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+shot options-jukebox
+key Return
+wait 2
+shot jukebox
+# first theme: show its pieces (the selection moves into the list)
+key Return
+wait 1
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Return
+wait 4
+shot playing-first-theme
+# back up out of the list to the last theme, and play its second piece
+key Up
+wait 0.3
+key Up
+wait 0.3
+key Up
+wait 0.3
+key Return
+wait 1
+key Down
+wait 0.3
+key Return
+wait 4
+shot playing-last-theme
+# leave: the music the game had comes back
+key Escape
+wait 2
+shot options-again
+key Escape
+wait 1
+key Escape
+wait 2
+shot resumed
+hold w 1
+wait 2
+shot final

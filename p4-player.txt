@@ -1,0 +1,191 @@
+# p4-player.txt -- playtest script for the modern build's multiplayer
+# character data (M-P4-04, M-P4-05): from the game, Escape -> Main menu ->
+# Multiplayer -> Player setup: the second cosmonaut (no helmet; its skins and
+# heads), the cosmonaut that keeps its helmet, the bystander's dummy head and
+# the winter bystander's second skin. Cate's setup animation (M-P4-05) shows
+# on entering.
+#   PLAYTEST_SCRIPT=tools/p4-player.txt PLAYTEST_NAME=p4-player \
+#       tools/playtest.sh out/game-modern 'Worlds\T01S01'
+window 180
+wait 15
+skipcine 90
+key Escape
+wait 2
+# Resume, Load, Save, Options, Main menu
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Return
+wait 2
+shot main
+# Single player, Resume game, Multiplayer
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Return
+wait 2
+shot multiplayer
+# park the pointer in the bottom-right corner, away from every control
+turn 300 230
+wait 0.5
+# Player setup
+key Return
+wait 4
+shot player
+# name, three toggles, connection, team, name transparency, name size, model
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Down
+wait 0.3
+shot player-model
+# the list is alphabetical: HERO,ACTION (21) back to COSMONAUT,STYLE2 (6)
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+key Left
+wait 0.5
+wait 2
+shot cosmonaut-style2
+# skin: Red; head: Head 2, Head 3
+key Down
+wait 0.3
+key Right
+wait 2
+shot cosmonaut-style2-red
+key Down
+wait 0.3
+key Right
+wait 2
+shot cosmonaut-style2-head2
+key Right
+wait 2
+shot cosmonaut-style2-head3
+# back up to the model: COSMONAUT,ACTION keeps its helmet
+key Up
+wait 0.3
+key Up
+wait 0.3
+key Left
+wait 2
+shot cosmonaut-action
+# on to MALEBYSTANDER,STYLE4 (29): its new Dummy head (Head3)
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+wait 2
+shot malebystander-style4
+key Down
+wait 0.3
+key Down
+wait 0.3
+key Left
+wait 2
+shot malebystander-style4-dummy
+# MALEBYSTANDER,WINTER (33): its new Alternate skin
+key Up
+wait 0.3
+key Up
+wait 0.3
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+key Right
+wait 0.5
+wait 2
+shot malebystander-winter
+key Down
+wait 0.3
+key Right
+wait 2
+shot malebystander-winter-alternate
