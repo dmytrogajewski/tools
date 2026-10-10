@@ -1,0 +1,72 @@
+# p1-options.txt -- a playtest script (tools/playtest.sh) for the modern
+# build's package P1 (MODERN.md): the options it adds or changes. From the
+# in-game menu: Performance > Screen (texture filtering, switched to
+# anisotropic 16x), Controls > Mouse (wheel smoothing, legacy mouse look)
+# and Display (Windowed, Intel graphics fix, switched on). Leaving Display
+# sets the mode again: under tools/playtest.sh's 1024x768 Xvfb display the
+# only modes are 1024x768, so the window becomes desktop-sized and
+# borderless.
+#   PLAYTEST_SCRIPT=tools/p1-options.txt tools/playtest.sh out/game-modern
+window 180
+wait 15
+skipcine 90
+shot play
+key Escape
+wait 2
+# park the pointer top right, off every folder's items (hovering an item
+# selects it); Up from a folder's first item goes to its Back button
+turn 300 -230
+wait 1
+# the in-game menu: Resume, Load, Save, Options, Main menu, Quit
+key Down Down Down Return
+wait 2
+shot options
+# Options: Display, Sound, Controls, Game, Performance
+key Down Down Down Down Return
+wait 2
+# Performance: Performance optimisation, Display, Special effects, ...
+key Down Return
+wait 2
+shot advdisplay
+# Advanced display: texture filtering is the eighth item (Mirrors, the
+# third, is disabled and skipped)
+key Down Down Down Down Down Down
+wait 1
+shot advdisplay-filtering
+key Right Right Right Right Right
+wait 1
+shot advdisplay-aniso
+key Escape
+wait 2
+key Escape
+wait 2
+# Options again (its first item selected): Controls
+key Down Down Return
+wait 2
+shot controls
+# Controls: Custom controls, Weapon controls, Mouse, ...
+key Down Down Return
+wait 2
+shot mouse
+key Escape
+wait 2
+key Escape
+wait 2
+# Options again: Display
+key Return
+wait 2
+shot display
+# Display: Renderer, Resolution (selected), Windowed, Texture depth,
+# Hardware cursor, Intel graphics fix
+key Down Down Down Down Right
+wait 1
+shot display-intelfix
+key Escape
+wait 6
+# the mode was set again: find the window anew
+window 60
+shot after-display
+wait 3
+# (Not resumed: resuming play after the renderer was re-initialised with a
+# world loaded crashes in d3d.ren under this Wine, in the release build
+# too.)
