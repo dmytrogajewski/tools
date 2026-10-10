@@ -62,7 +62,7 @@ the client will regress the server.
 | `dsp2files.py` | `build/build.sh` | Lists a VC6 `.dsp` project's source files for one configuration, so the game DLLs compile exactly the files the original project did. |
 | `mkimplib.py` | `build/engine.sh` | Writes a COFF import library for a few named imports (Miles' decorated names, `DirectDrawCreateEx`). |
 | `mkaliasobj.py` | `build/engine.sh` | Turns `src/engine/*/link/aliases.rsp` into an object of weak externals: one function or global reached under two names. |
-| `mkvtabobj.py` | `build/engine.sh` | Turns `src/engine/lithtech/link/vtables.txt` into an object holding full-length vtables for classes the source only partly declares. |
+| `mkvtabobj.py` | `build/engine.sh` | Turns `src/engine/lithtech/link/vtables.txt` into an object holding full-length vtables for classes the source only partly declares. Slots between `%ifdef NOLFSRC_MODERN` and `%endif` are added only in the modern build (`--define NOLFSRC_MODERN`: the modern `ILTClient`'s extra slots). |
 | `mkviewobj.py` | `build/engine.sh` | Turns `src/engine/d3d/link/d3dviews.txt` into an object laying out `d3d.ren`'s globals as the original did. |
 | `loadtest.c`, `d3dloadtest.c` | `build/engine.sh server-link test`, `d3d-link test` | Small Win32 programs run under Wine: each occupies the module's preferred base first, so the loader has to relocate it, then loads it and exercises its exports (`CreateServer` / `DeleteServer`; the display-mode list and `RenderDLLSetup`). |
 | `playtest.sh` | `make test` | Runs a game directory under Xvfb in the build container, optionally driving it with an input script, and reports ALIVE / EXITED / CRASHED (plus `wine.log` and screenshots in `out/play/<name>/`). Usage in its header. |

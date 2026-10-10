@@ -1,0 +1,63 @@
+# p2-console.txt -- the modern build's developer console (MODERN.md, P2),
+# for tools/playtest.sh (PLAYTEST_SCRIPT=tools/p2-console.txt) on a modern
+# game directory (out/game-modern). Opens the console with the key left of
+# 1, runs Help (the engine's command list, through the console hook of
+# M-P0-02), an unknown command (the engine's own reply), Cheats, then turns
+# on big head mode and trigger boxes, and closes the console again.
+window 180
+wait 15
+shot loaded
+skipcine 90
+shot play
+# open the console
+key grave
+wait 1
+shot console-open
+# help: the engine's list of commands
+key h e l p Return
+wait 1
+shot help
+# something the engine does not know: its own message comes back
+key x y z z y Return
+wait 1
+shot unknown
+# the cheat list
+key c h e a t s Return
+wait 1
+shot cheats
+# scroll back and forth, recall the last command
+key Prior
+wait 0.5
+shot scrolled-back
+key Next Up
+wait 0.5
+shot recalled
+key BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace
+# big head mode and trigger boxes (client and server variables)
+key b i g h e a d m o d e space 2 Return
+wait 0.5
+key d i s p l a y t r i g g e r s space 1 Return
+wait 0.5
+key c o n s o l e h i s t o r y t o l o g Return
+wait 1
+shot set-vars
+# close it; the game runs on
+key grave
+wait 1
+shot closed
+hold w 2
+turn 300 0
+wait 2
+shot bigheads
+key Escape
+wait 2
+shot menu
+# the console over the menu
+key grave
+wait 1
+shot console-menu
+key Escape
+wait 1
+key Escape
+wait 2
+shot final
