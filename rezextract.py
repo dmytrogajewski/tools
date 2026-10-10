@@ -17,7 +17,10 @@ HDR_TEXT = 127  # 2 + 60 + 2 + 60 + 2 + 1 (two title lines + CR/LFs + 0x1A)
 
 class Rez:
     def __init__(self, path):
-        self.f = open(path, "rb")
+        # a path, or an open binary file positioned anywhere (it is read
+        # from offset 0 of whatever it presents)
+        self.f = path if hasattr(path, "read") else open(path, "rb")
+        self.f.seek(0)
         hdr = self.f.read(HDR_TEXT)
         if b"RezMgr" not in hdr:
             raise RuntimeError("not a RezMgr file")
