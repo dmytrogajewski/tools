@@ -25,6 +25,10 @@ shot unknown
 key c h e a t s Return
 wait 1
 shot cheats
+# a variable's value (M-P2-13: the engine's debug level stays 0)
+key d e b u g l e v e l Return
+wait 1
+shot debuglevel
 # scroll back and forth, recall the last command
 key Prior
 wait 0.5
@@ -32,7 +36,7 @@ shot scrolled-back
 key Next Up
 wait 0.5
 shot recalled
-key BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace
+key BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace
 # big head mode and trigger boxes (client and server variables)
 key b i g h e a d m o d e space 2 Return
 wait 0.5

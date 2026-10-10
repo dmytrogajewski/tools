@@ -1,0 +1,21 @@
+# p2-bighead.txt -- big head mode (MODERN.md, M-P2-10) through the modern
+# build's developer console, for tools/playtest.sh on a modern game
+# directory, on Worlds\M03S01 (a character stands in front of the player).
+window 180
+wait 15
+skipcine 90
+shot normal
+key grave
+wait 0.5
+key b i g h e a d m o d e space 2 Return
+wait 0.5
+shot console
+key grave
+wait 1.5
+shot bighead
+key grave
+wait 0.5
+key b i g h e a d m o d e space 0 Return
+key grave
+wait 1.5
+shot normal-again
