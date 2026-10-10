@@ -1,0 +1,23 @@
+# p5-summary.txt -- M-P5-11/M-P5-14 check for tools/playtest.sh: play into the
+# level past the opening cinematic, then end the level with the exit-level
+# cheat (typed into the message box, T), so the mission summary appears.
+# Look at the summary shots for its continue control.
+window 180
+wait 15
+skipcine 90
+shot play
+key t
+wait 1
+key m p m a p h o l e
+wait 0.5
+shot typed
+key Return
+wait 8
+shot exit1
+wait 8
+shot exit2
+wait 8
+shot exit3
+key Return
+wait 6
+shot after-return
