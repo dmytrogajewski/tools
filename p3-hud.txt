@@ -1,0 +1,25 @@
+# p3-hud.txt -- input script for the HUD at any resolution (MODERN.md, P3):
+# skips into play, then screenshots the HUD, the weapon chooser and the
+# in-game menu. Start on Worlds\T01S01:
+#   PLAYTEST_RES=1280x720 PLAYTEST_CFG=<file with "UIScale" "1.000000"> \
+#       PLAYTEST_SCRIPT=tools/p3-hud.txt tools/playtest.sh out/game-modern
+window 180
+wait 15
+shot loaded
+skipcine 90
+shot play
+key Shift_L
+wait 0.5
+shot chooser
+wait 3
+key 2
+wait 2
+shot weapon2
+key 1
+wait 2
+key Escape
+wait 2
+shot menu
+key Escape
+wait 2
+shot final

@@ -8,7 +8,8 @@
 # gamedir:    a complete game directory, as build/all.sh assembles it
 #             (default out/game). It is tested exactly as it is: every
 #             binary in it runs, nothing is substituted or filled in.
-# world:      a world path inside the .rez stack (default Worlds\T01S01)
+# world:      a world path inside the .rez stack (default Worlds\T01S01);
+#             "-" starts without one (the game opens on its main menu)
 # seconds:    how long to let it run before judging (default 60; in script
 #             mode, extra idle seconds after the script, default 0)
 #
@@ -48,6 +49,12 @@
 #                         (default 90s)
 #   shot <name>           screenshot the game window -> shots/NN-<name>.png
 #   focus                 re-focus the game window
+#   mmove <x> <y>         move the pointer to a point of the menus' 640x480
+#                         page, mapped to the window as PLAYTEST_MAP says:
+#                         "retail" (default: the page centred, unscaled) or
+#                         "modern" (the modern build: the centred 4:3 area,
+#                         scaled by the height; MODERN.md, M-P3-01)
+#   mclick <x> <y>        the same, then a click of button 1
 # After every command the runner checks the game process; if it has died the
 # script stops and the run is judged (EXITED / CRASHED, naming the line).
 # Everything that happened goes to script.log; shots.png is a contact sheet
@@ -55,6 +62,12 @@
 # replays the same inputs at the same moments on every run -- compare two
 # runs with `playtest.sh compare` (game-side timing, AI and physics still
 # vary, so expect near, not pixel-identical, frames).
+# Optional settings, from the environment:
+#   PLAYTEST_RES=WxH      the screen mode (32-bit) instead of the game
+#                         directory's 640x480x16; the virtual display grows
+#                         to fit it (e.g. 1280x720, 1920x1080)
+#   PLAYTEST_CFG=<file>   console variables appended to the run's
+#                         autoexec.cfg (lines like "UIScale" "1.000000")
 # The default keys (defctrls.cfg): WASD move, arrows turn, Space jump,
 # C duck, F / mouse 1 fire, R reload, Shift_L next weapon, 1-0 weapons,
 # E activate, F6 quicksave, F9 quickload, Escape menu.
@@ -116,7 +129,16 @@ fi
 # The engine takes the world from the command file, not from arguments after
 # -cmdfile: write a per-run copy with +runworld appended.
 rm -f "$RUN/nolfcmds.txt"
-printf '%s +runworld %s\n' "$(tr -d '\r\n' < "$GAME/nolfcmds.txt")" "$WORLD" > "$RUN/nolfcmds.txt"
+CMDS="$(tr -d '\r\n' < "$GAME/nolfcmds.txt")"
+SCREEN=1024x768
+if [ -n "${PLAYTEST_RES:-}" ]; then
+    RW=${PLAYTEST_RES%x*}; RH=${PLAYTEST_RES#*x}
+    CMDS="$(echo "$CMDS" | sed -E "s/\+\+screenwidth [0-9]+/++screenwidth $RW/; s/\+\+screenheight [0-9]+/++screenheight $RH/; s/\+\+bitdepth [0-9]+/++bitdepth 32/")"
+    SCREEN="$(( RW + 200 > 1024 ? RW + 200 : 1024 ))x$(( RH + 200 > 768 ? RH + 200 : 768 ))"
+fi
+if [ "$WORLD" = - ]; then printf '%s\n' "$CMDS" > "$RUN/nolfcmds.txt"
+else printf '%s +runworld %s\n' "$CMDS" "$WORLD" > "$RUN/nolfcmds.txt"; fi
+[ -n "${PLAYTEST_CFG:-}" ] && { cat "$(abs "$PLAYTEST_CFG")" >> "$RUN/autoexec.cfg" || exit 2; }
 
 # The runner, executed inside the container under xvfb-run.
 cat > "$RUN/runner.sh" <<'RUNNER'
@@ -145,6 +167,16 @@ if [ -f script.txt ]; then
         WX=${X:-0}; WY=${Y:-0}; WW=${WIDTH:-1024}; WH=${HEIGHT:-768}
     }
     focuswin() { [ -n "$WIN" ] && xdotool windowfocus "$WIN" 2>/dev/null; }
+    # a point of the menus' 640x480 page -> the pointer (see mmove)
+    pagemove() {
+        local p
+        p="$(awk -v lx=$1 -v ly=$2 -v W=$((WW-2)) -v H=$((WH-2)) -v m="${PLAYTEST_MAP:-retail}" 'BEGIN {
+            if (m == "modern") { s = H/480; x = lx*s + (W - H*4/3)/2; y = ly*s }
+            else { x = lx + (W-640)/2; y = ly + (H-480)/2 }
+            printf "%d %d", x, y }')"
+        set -- $p
+        xdotool mousemove $((WX+1+$1)) $((WY+1+$2))
+    }
     grab() { xwd -root -silent | convert xwd:- -crop "${WW}x${WH}+${WX}+${WY}" +repage "$@"; }
     # is the HUD up (= the player is in control)? The health bar: red, at
     # x 30..60, y 448..452 of the 640x480 view (scaled to the window size).
@@ -191,6 +223,8 @@ if [ -f script.txt ]; then
                 log "  skipcine done after $(( $(date +%s) - st ))s" ;;
             shot)  N=$((N+1)); f=$(printf 'shots/%02d-%s.png' $N "$1"); grab "$f"; log "  -> $f" ;;
             focus) focuswin ;;
+            mmove) pagemove "$1" "$2" ;;
+            mclick) pagemove "$1" "$2"; sleep 0.4; xdotool mousedown 1; sleep 0.1; xdotool mouseup 1 ;;
             *)     log "  unknown command: $cmd" ;;
         esac
     done < <(tr -d '\r' < script.txt)
@@ -224,7 +258,8 @@ RUNNER
 cd "$RUN" || exit 1
 export WINEDEBUG=${PLAYTEST_WINEDEBUG:--all,+seh} WINEDLLOVERRIDES=${PLAYTEST_DLLOVERRIDES-winedbg.exe=d}
 [ -n "${PLAYTEST_PREFIX:-}" ] && export WINEPREFIX=$PLAYTEST_PREFIX
-xvfb-run -a -s '-screen 0 1024x768x24' bash runner.sh $SECS
+export PLAYTEST_MAP="${PLAYTEST_MAP:-retail}"
+xvfb-run -a -s "-screen 0 ${SCREEN}x24" bash runner.sh $SECS
 )
 cat "$RUN/result.txt" 2>/dev/null || echo "NO RESULT (the run failed)"
 grep -q '^ALIVE' "$RUN/result.txt" 2>/dev/null
