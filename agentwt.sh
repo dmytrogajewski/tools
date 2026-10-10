@@ -19,7 +19,8 @@
 # toolchain/ stays a real directory (it has tracked files); each compiler
 # tree in it is linked, and .gitignore's /toolchain/* already ignores those.
 #
-# The worktree is a new branch, wt/<name>, started at HEAD: uncommitted
+# The worktree is a new branch, wt/<name>, started at HEAD (or at the given
+# start point -- another branch, e.g. a wt/ branch to build on): uncommitted
 # changes in the main checkout are not in it. Commit verified work there and
 # merge or cherry-pick it from the main checkout; `rm` removes the tree but
 # keeps the branch (delete it with `git branch -D wt/<name>` once merged).
@@ -31,7 +32,7 @@
 #   cd /repo/.worktrees/<name>
 #   build/libs.sh all && build/engine.sh server   # then the *-one loops
 #
-# Usage:  tools/agentwt.sh add <name>      # prints the host and container paths
+# Usage:  tools/agentwt.sh add <name> [start]   # prints the host and container paths
 #         tools/agentwt.sh rm  <name>
 #         tools/agentwt.sh list
 set -e
@@ -47,7 +48,7 @@ add)
         if git -C "$REPO" show-ref -q --verify "refs/heads/wt/$name"; then
             git -C "$REPO" worktree add -q "$dir" "wt/$name"
         else
-            git -C "$REPO" worktree add -q -b "wt/$name" "$dir" HEAD
+            git -C "$REPO" worktree add -q -b "wt/$name" "$dir" "${3:-HEAD}"
         fi
     fi
     # the compiler trees, one link each, beside toolchain/'s tracked files
