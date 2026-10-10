@@ -1,0 +1,54 @@
+# p5-features.txt -- M-P5-12/M-P5-13 check for tools/playtest.sh, run on a
+# game directory whose defaults.cfg sets "QuickSwitch" "1" and binds the
+# ToggleZoom action to Z. Gives all weapons and mods with the cheats (typed
+# into the message box, T), then steps through weapons with quick switch
+# (firing while the chooser is still up) and steps the scope with Z.
+window 180
+wait 15
+skipcine 90
+shot play
+key t
+wait 1
+key m p i m y o u r f a t h e r Return
+wait 1
+key t
+wait 1
+key m p m i m i m i Return
+wait 2
+shot weapons
+turn 0 300
+wait 0.5
+key Shift_L
+wait 0.3
+shot qs-next1
+click 1 0.3
+wait 1.5
+shot qs-fired
+key Shift_L
+wait 0.3
+key Shift_L
+wait 1.5
+shot qs-next3
+wait 3
+shot qs-closed
+key 7
+wait 3
+key t
+wait 1
+key m p g o a t t e c h Return
+wait 2
+key 7
+wait 3
+shot ak47-mods
+key z
+wait 2
+shot zoom1
+key z
+wait 2
+shot zoom2
+key z
+wait 2
+shot zoom3
+key z
+wait 2
+shot zoom4
