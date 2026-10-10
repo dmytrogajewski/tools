@@ -27,8 +27,13 @@ One slot per line, in order. A slot may be `0x<hex>` for a literal dword
 (nothing in this project should need it). Symbols are external references;
 an unresolved one is a link error like any other.
 
+Lines between `%ifdef NAME` and `%endif` count only when `--define NAME` is
+given: build/engine.sh passes `--define NOLFSRC_MODERN` in the modern build
+(build/variant.sh), whose ILTClient has slots the retail one does not. Without
+it they are skipped, so the release build's object is the same as ever.
+
 Usage:
-  mkvtabobj.py <spec.txt> <out.obj>
+  mkvtabobj.py [--define NAME]... <spec.txt> <out.obj>
 """
 import struct
 import sys
@@ -40,13 +45,26 @@ RDATA_COMDAT = 0x00000040 | 0x00001000 | 0x00300000 | 0x40000000
 SELECT_ANY = 2
 
 
-def parse(path):
+def parse(path, defines=()):
     tabs = []
+    skip = None          # outside %ifdef: None; inside: True to skip, False to keep
     for line in open(path, errors="replace"):
         line = line.split("#", 1)[0].strip()
         if not line:
             continue
         w = line.split()
+        if w[0] == "%ifdef":
+            if skip is not None or len(w) != 2:
+                sys.exit("%s: bad or nested %%ifdef: %s" % (path, line))
+            skip = w[1] not in defines
+            continue
+        if w[0] == "%endif":
+            if skip is None:
+                sys.exit("%s: %%endif without %%ifdef" % path)
+            skip = None
+            continue
+        if skip:
+            continue
         if w[0] == "vtable":
             tabs.append((w[1], []))
         else:
@@ -55,9 +73,15 @@ def parse(path):
 
 
 def main():
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    defines = []
+    while len(args) >= 2 and args[0] == "--define":
+        defines.append(args[1])
+        args = args[2:]
+    if len(args) != 2:
         sys.exit(__doc__)
-    tabs = parse(sys.argv[1])
+    sys.argv[1:] = args
+    tabs = parse(sys.argv[1], defines)
     missing = [(n, s) for n, sl in tabs for s in sl if s == "MISSING"]
     if missing:
         sys.exit("%s: %d MISSING slot(s) (first in %s) -- every slot needs a "
