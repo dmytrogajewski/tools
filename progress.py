@@ -306,11 +306,23 @@ APP_REGION = {
 #   Object.lto 0x101503e0..0x101503ff: MFCStub's CRect::CRect(l, t, r, b)
 #     (32 bytes, ret 0x10), linked after the CRT as in our Object.lto: an
 #     import thunk at 0x101503d0 below it, CRT code from 0x10150400.
+#   d3d.ren 0x1007faa0..0x1007fb1f: StdLith's l_allocator.cpp -- LAlloc's
+#     three virtuals (0x1007fae0 Alloc, 0x1007faf0 Free, 0x1007fb00 the
+#     scalar deleting destructor; vtable 0x100881b8) and g_DefAlloc's VC6
+#     initialiser thunks (0x1007faa0 `call 0x1007fab0; jmp 0x1007fac0`,
+#     the vtable store, the atexit registration, the atexit destructor).
+#     Monolith's code: its Alloc and Free call the renderer's own
+#     DefStdlithAlloc/DefStdlithFree (0x10021ce0/0x10021cb0), and
+#     src/engine/d3d/w12_7fae0.cpp is all seven, byte-identical (cl 8447,
+#     as StdLith). It opens the tail above APP_REGION; StdLith.lib's
+#     struct_bank.obj follows at 0x1007fb20 (sb_Init), which d3d.ren does
+#     not score (StdLith's own row does).
 APP_ISLANDS = {
     "server.dll": [(0x1004bb20, 0x1004bdd0)],
     "lithtech.exe": [(0x004a03d0, 0x004a0620)],
     "CShell.dll": [(0x100fd930, 0x10100870)],
     "Object.lto": [(0x101503e0, 0x10150400)],
+    "d3d.ren": [(0x1007faa0, 0x1007fb20)],
 }
 
 
