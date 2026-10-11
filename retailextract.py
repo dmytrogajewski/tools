@@ -3,6 +3,9 @@
 
   retailextract.py resources   <retaildir> <gamedir>  game DATA only (no binary)
   retailextract.py thirdparty  <retaildir> <gamedir>  Miles + Bink, nothing else
+  retailextract.py openruntime <extdir> <gamedir>     the modern build's open
+                                                      replacements for them
+                                                      (build/ext.sh's output)
   retailextract.py launcherres <retaildir> <resdir>   the launcher's art and
                                                       sound, out of the retail
                                                       NOLF.exe's resources
@@ -38,6 +41,12 @@ custom/ rez directory, which the engine searches last-first).
 no source for: Miles Sound System (mss32.dll and its .flt / .m3d / .asi /
 .as6 providers) and Bink (binkw32.dll). These are the only binaries from the
 retail game that go into ours, and they come only from here.
+
+`openruntime` is the modern build's step 2 instead (NOLF_MIDDLEWARE=open,
+build/all.sh): it removes any retail Miles / Bink file a previous build left
+in the game directory and installs OpenMiles' mss32.dll and our FFmpeg-based
+binkw32.dll, which build/ext.sh built from ext/ into <extdir>. OpenMiles
+decodes and mixes everything itself, so no Miles provider file goes in.
 
 `launcherres` writes the six binary resources launcher.rc includes from
 src/engine/launcher/res/ -- the splash bitmap and its palette, the music,
@@ -262,6 +271,30 @@ def cmd_thirdparty(retaildir, gamedir):
     print(f"== third-party runtime: {n} files (Miles, Bink)")
 
 
+# The modern build's replacements (build/ext.sh), and where each comes from.
+OPEN_RUNTIME = [
+    ("mss32.dll",   "ext/openmiles: OpenMiles, Miles 6.0 exports"),
+    ("binkw32.dll", "src/modern/binkw32 + ext/ffmpeg: our Bink player"),
+]
+
+
+def cmd_openruntime(extdir, gamedir):
+    gamedir = Path(gamedir)
+    gamedir.mkdir(parents=True, exist_ok=True)
+    man = Manifest(gamedir)
+    for f in sorted(gamedir.iterdir()):
+        if f.is_file() and is_third_party(f.name):
+            f.unlink()
+            man.rows.pop(f.name, None)
+            print(f"   removed {f.name}")
+    for name, origin in OPEN_RUNTIME:
+        shutil.copyfile(Path(extdir) / name, gamedir / name)
+        man.add(name, f"EXT {origin} (build/ext.sh)")
+        print(f"   {name}  <-  {origin}")
+    man.save()
+    print(f"== open runtime: {len(OPEN_RUNTIME)} files (OpenMiles, Bink on FFmpeg)")
+
+
 # --- launcher resources -----------------------------------------------------
 
 RT_CURSOR, RT_BITMAP, RT_ICON, RT_GROUP_CURSOR, RT_GROUP_ICON = 1, 2, 3, 12, 14
@@ -483,15 +516,17 @@ def cmd_audit(gamedir):
                 for ename, _pos, sz in rez_pe_entries(full):
                     rows.append(("INSIDE A REZ ARCHIVE", f"{rel}:{ename}", sz))
                     bad += 1
-    order = {"built": 0, "THIRD-PARTY": 1}
-    rows.sort(key=lambda r: (order.get(r[0].split()[0], 2), r[1].lower()))
+    order = {"built": 0, "EXT": 1, "THIRD-PARTY": 2}
+    rows.sort(key=lambda r: (order.get(r[0].split()[0], 3), r[1].lower()))
     print(f"{'size':>9}  {'file':<24} origin")
     for origin, rel, sz in rows:
         print(f"{sz:>9}  {rel:<24} {origin}")
     built = sum(1 for r in rows if r[0].startswith("built"))
+    ext = sum(1 for r in rows if r[0].startswith("EXT"))
     third = sum(1 for r in rows if r[0].startswith("THIRD-PARTY"))
     print(f"{len(rows)} PE files: {built} built from our source, "
-          f"{third} third-party runtime, {bad} unaccounted for")
+          + (f"{ext} open-source middleware built from ext/, " if ext else "")
+          + f"{third} third-party runtime, {bad} unaccounted for")
     return 1 if bad else 0
 
 
@@ -503,6 +538,8 @@ def main():
         cmd_resources(sys.argv[2], sys.argv[3])
     elif cmd == "thirdparty" and len(sys.argv) == 4:
         cmd_thirdparty(sys.argv[2], sys.argv[3])
+    elif cmd == "openruntime" and len(sys.argv) == 4:
+        cmd_openruntime(sys.argv[2], sys.argv[3])
     elif cmd == "launcherres" and len(sys.argv) == 4:
         cmd_launcherres(sys.argv[2], sys.argv[3])
     elif cmd == "goty" and len(sys.argv) == 4:
