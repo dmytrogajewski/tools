@@ -46,7 +46,9 @@ build/engine.sh server-link     # link server.dll
 
 `build/libs.sh` targets: `stdlith cryptmgr lith rezmgr regmgr mfcstub ztools
 butemgr ltguimgr lithfontmgr gamespy all`; it writes the libraries to
-`src/lithshared/out/`. `build/engine.sh` with no arguments prints its targets;
+`src/lithshared/out/`. `regmgr` also builds `RegMgr_Debug.lib`, the same
+source with the `.dsp`'s Debug settings, which only `CShell.dll` links (the
+Game of the Year `CShell.dll` has the Debug build's code). `build/engine.sh` with no arguments prints its targets;
 its header lists the compiler and flags for each.
 
 `src/engine/server/` is compiled into **both** `server.dll` (`/O1`) and

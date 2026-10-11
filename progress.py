@@ -170,9 +170,12 @@ ENGINE = [
 # lithshared libraries it links, which are ours too -- as StdLith.lib in
 # server.dll).
 GAME = [
+    # CShell links RegMgr_Debug, the Debug build of regmgr.lib, where the
+    # others link the Release one: so did the Game of the Year CShell.dll
+    # (build/libs.sh, build_regmgr_debug).
     ("CShell.dll", REFERENCE + "/CShell.dll", "src/game/ClientShellDLL/Final_Release",
      ["StdLith", "CryptMgr", "ltguimgr_LT2", "MFCStub", "ButeMgrNoMFC",
-      "GameSpyClientMgr", "RegMgr", "LithFontMgr_LT2"]),
+      "GameSpyClientMgr", "RegMgr_Debug", "LithFontMgr_LT2"]),
     ("Object.lto", REFERENCE + "/Object.lto", "src/game/ObjectDLL/Final_Release",
      ["StdLith", "CryptMgr", "MFCStub", "ButeMgrNoMFC", "GameSpyMgr", "RegMgr"]),
 ]
