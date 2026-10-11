@@ -20,6 +20,8 @@ and classifies our reconstruction of each as:
   driver     (ours) a function only a scoring driver (DRIVER_OBJS) emits
   crt        outside the image's app region (the static CRT/MFC): listed,
              not counted
+  middleware inside a third-party library linked into the app region
+             (MIDDLEWARE: the GameSpy SDK): listed, not counted
 
 Coverage is the pair of counts summary.json carries per target: UNWRITTEN
 (todo + attempted: shipped functions with nothing of ours placed at them)
@@ -305,8 +307,41 @@ APP_ISLANDS = {
 }
 
 
+# Third-party middleware linked INSIDE an app region: real code in the
+# binary, but not Monolith's and not a reconstruction target, so -- like the
+# CRT above the region -- its functions are listed ("middleware") and not
+# counted. The game DLLs link the GameSpy library between ButeMgrNoMFC and
+# the CRT/RegMgr: Monolith's thin CGameSpy* wrapper over the GameSpy SDK
+# (the "C Engine" server list in CShell, the query responder in Object),
+# shipped prebuilt; src/lithshared/gamespy/ stands in for it from the
+# headers alone and is deliberately not byte-matched (the master server it
+# talked to is gone). Evidence for the ranges: the WSOCK32 imports, the
+# master.gamespy.com and \gamename\%s\... strings and every caller of the
+# block lie in it, and nothing else in the image calls into it except
+# through the wrapper.
+#   CShell.dll 0x100eb650..0x100edab0: CGameSpyClientMgr::Init (strcpy of
+#     the game name and key into +8/+0x88) right after ButeMgrNoMFC's
+#     zSLink::freecache, through the SDK's hash table/array helpers, to
+#     libcimt's first function at 0x100edab0 (APP_REGION's end).
+#   Object.lto 0x10140950..0x10141b30: CGameSpyMgr::Init (7 arguments,
+#     this+0x107c) right after StdLith's MoArray_FindElementMemcmp, to the
+#     end of the last function's switch table; RegMgr's CRegMgr::Init
+#     starts at 0x10141b30.
+MIDDLEWARE = {
+    "CShell.dll": [(0x100eb650, 0x100edab0)],
+    "Object.lto": [(0x10140950, 0x10141b30)],
+}
+
+
+def in_middleware(label, a):
+    return any(l <= a < h for l, h in MIDDLEWARE.get(label, ()))
+
+
 def in_app(label, a, lo, hi):
-    """True when address a is Monolith code (APP_REGION or an island)."""
+    """True when address a is Monolith code (APP_REGION or an island, less
+    MIDDLEWARE)."""
+    if in_middleware(label, a):
+        return False
     if lo <= a < hi:
         return True
     return any(l <= a < h for l, h in APP_ISLANDS.get(label, ()))
@@ -1324,7 +1359,9 @@ def _rows_for_image(label, exe_path, objs):
                          "unlinked" if ours_at else "unplaced"))
     for a in sorted(set(starts) | set(matched)):
         size = matched.get(a, sizes.get(a, 0))
-        if a in matched:
+        if in_middleware(label, a):
+            rows.append((label, "sub_%x" % a, size, "middleware"))
+        elif a in matched:
             rows.append((label, "sub_%x" % a, size, "identical"))
         elif a in paired:
             rows.append((label, "sub_%x" % a, size, "near"))
@@ -1708,6 +1745,7 @@ def main():
         t = targets.setdefault(label, {"identical": 0, "near": 0, "todo": 0,
                                        "attempted": 0,
                                        "small": 0, "crt": 0, "crt_bytes": 0,
+                                       "middleware": 0, "middleware_bytes": 0,
                                        "unplaced": 0, "unplaced_bytes": 0,
                                        "unlinked": 0, "unlinked_bytes": 0,
                                        "driver": 0, "driver_bytes": 0,
@@ -1715,8 +1753,8 @@ def main():
                                        "bytes_identical": 0, "bytes_total": 0,
                                        "funcs": 0})
         t[status] += 1
-        if status == "crt":          # toolchain code: visible, not a target
-            t["crt_bytes"] += size
+        if status in ("crt", "middleware"):  # not Monolith's: visible,
+            t[status + "_bytes"] += size        # not a target
             continue
         if status in ("unplaced", "unlinked", "driver"):  # ours, no shipped
             t[status + "_bytes"] += size        # address: not a shipped
