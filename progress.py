@@ -1365,8 +1365,15 @@ def _rows_for_image(label, exe_path, objs):
         mine_by_shape = {}
         seen = set()
         for n, (code, mask) in funcs.items():
+            # a scoring driver's own short functions (sdkforce.cpp's
+            # pointer-to-member globals each get a 5-byte `_$E` initializer
+            # thunk and its body) are not shipped code: counted here they
+            # inflated the surplus of their shape, and the excess was then
+            # reported against whichever real object's functions of that
+            # shape sorted last (worldsim.obj's `_$E` thunks).
             if len(code) - len(mask) >= 8 or n in from_lib or \
-                    n not in ours_at or fname(n) in seen:
+                    n not in ours_at or fname(n) in seen or \
+                    n.split(":", 1)[0].lower() in DRIVER_OBJS:
                 continue
             seen.add(fname(n))
             mine_by_shape.setdefault(shape(code, mask), []).append(n)
