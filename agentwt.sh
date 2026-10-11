@@ -11,14 +11,15 @@
 #                     worktree)
 #   out/reference/    the retail images the checks compare against
 #                     (build/reference.sh)
-#   ISOS/*.iso        the disc images (build/reference.sh, build/all.sh)
+#   rez/              the installed retail game the build takes its data
+#                     from (a submodule too; build/retail.sh)
 #
 # so they are symlinked in, RELATIVELY: the worktree lives inside the
 # checkout (.worktrees/<name>, gitignored), and the build container mounts
 # the checkout at /repo, so a relative link resolves both on the host and in
 # the container. An absolute host path would not resolve in the container.
-# toolchains/ stays a real directory (the submodule's, uninitialised in a
-# worktree); each compiler tree in it is linked.
+# toolchains/ and rez/ stay real directories (the submodules', uninitialised
+# in a worktree); each compiler tree, and each entry of rez/, is linked.
 #
 # The worktree is a new branch, wt/<name>, started at HEAD (or at the given
 # start point -- another branch, e.g. a wt/ branch to build on): uncommitted
@@ -60,8 +61,11 @@ add)
     done
     mkdir -p "$dir/out"
     [ -L "$dir/out/reference" ] || ln -s ../../../out/reference "$dir/out/reference"
-    for iso in NOLF1-CD1.iso NOLF1-CD2.iso; do
-        [ -e "$REPO/ISOS/$iso" ] && [ ! -L "$dir/ISOS/$iso" ] && ln -s "../../../ISOS/$iso" "$dir/ISOS/$iso"
+    # rez/: its scripts and checksums, and the installed game in games/
+    mkdir -p "$dir/rez"
+    for t in "$REPO"/rez/*; do
+        t="$(basename "$t")"
+        [ -e "$dir/rez/$t" ] || ln -s "../../../rez/$t" "$dir/rez/$t"
     done
     [ -f "$REPO/out/reference/server.dll" ] \
         || echo "note: no out/reference/ yet -- run build/reference.sh in the main checkout"
@@ -72,8 +76,7 @@ add)
 rm)
     name="${2:?usage: agentwt.sh rm <name>}"
     # the links first, so nothing can reach through them to the real trees
-    find "$WTROOT/$name/toolchains" "$WTROOT/$name/toolchain" "$WTROOT/$name/out" -maxdepth 1 -type l -delete 2>/dev/null || true
-    rm -f "$WTROOT/$name"/ISOS/*.iso
+    find "$WTROOT/$name/toolchains" "$WTROOT/$name/rez" "$WTROOT/$name/out" -maxdepth 1 -type l -delete 2>/dev/null || true
     git -C "$REPO" worktree remove --force "$WTROOT/$name" 2>/dev/null || rm -rf "$WTROOT/$name"
     git -C "$REPO" worktree prune
     echo "removed $name (branch wt/$name kept)"

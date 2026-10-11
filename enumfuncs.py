@@ -43,7 +43,7 @@ PROLOGUES = [
 
 class Image:
     """A PE image -- for the denominator, always a retail one
-    (out/reference/, extracted from the disc by `tools/discextract.py reference`): an enumeration of
+    (out/reference/, extracted from the retail game by `tools/retailextract.py reference`): an enumeration of
     anything else would drift with our own progress."""
 
     def __init__(self, path):

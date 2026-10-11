@@ -18,7 +18,7 @@ import tempfile
 
 class Pe:
     """A PE image. The retail ones (the ground truth every oracle compares
-    against) are in out/reference/, extracted from the disc by `tools/discextract.py reference`."""
+    against) are in out/reference/, extracted from the retail game by `tools/retailextract.py reference`."""
 
     def __init__(self, path):
         self.path = path

@@ -4,7 +4,7 @@
 The modern build (`make modern`, NOLFSRC_MODERN) needs some game data changed
 as well as code: an attribute value, a new menu's strings. No game data is
 committed to this repository, so a change is committed as a RECIPE, and this
-applies it to the data the build already took from the discs:
+applies it to the data the build already took from the retail game:
 
   src/modern/data/<path>.patch   a unified diff against the retail file at
                                  <path> in the rez stack (e.g.

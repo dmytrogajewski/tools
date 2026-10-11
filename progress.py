@@ -32,8 +32,9 @@ requires both at zero). unplaced, unlinked and driver rows are ours, not
 shipped functions: none of them is in the denominator.
 
 Ground truth is always the SHIPPED binary, so the denominator can't drift.
-The engine images (lithtech.exe, server.dll, d3d.ren, NOLF.exe) come off the
-disc into out/reference/ (`tools/discextract.py reference`), and so do the
+The engine images (lithtech.exe, server.dll, d3d.ren, NOLF.exe) come from the
+installed retail game into out/reference/ (`tools/retailextract.py
+reference`), and so do the
 Game of the Year game DLLs (CShell.dll, Object.lto, CRes.dll, out of
 NOLFGOTY.REZ); CRes.dll holds no code of Monolith's, so it is scored
 resource by resource instead (rows_for_resources); the lithshared
@@ -97,8 +98,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # The retail images every denominator and oracle comes from, extracted from
-# the disc images by `tools/discextract.py reference` (`make progress` does
-# it); the build itself never reads them.
+# the installed retail game by `tools/retailextract.py reference` (`make
+# progress` does it); the build itself never reads them.
 REFERENCE = "out/reference"
 
 # Where this writes, and where the recorded baseline and the hand-curated
@@ -1696,7 +1697,7 @@ def main():
                if not os.path.exists(os.path.join(REFERENCE, n))]
     if missing:
         sys.exit("progress.py: %s missing from %s/ -- run `make progress`, or "
-                 "tools/discextract.py reference <isodir> %s"
+                 "tools/retailextract.py reference <retaildir> %s"
                  % (", ".join(missing), REFERENCE, REFERENCE))
     # ... and so would a missing build: every function would read "todo".
     unbuilt = [d for d in ("src/engine/launcher", "src/engine/server",

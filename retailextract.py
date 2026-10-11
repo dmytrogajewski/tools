@@ -1,26 +1,33 @@
 #!/usr/bin/env python3
-"""Take what the build needs off the two NOLF GOTY disc images.
+"""Take what the build needs from the installed retail game.
 
-  discextract.py resources  <isodir> <gamedir>   game DATA only (no binary)
-  discextract.py thirdparty <isodir> <gamedir>   Miles + Bink, nothing else
-  discextract.py launcherres <isodir> <resdir>   the launcher's art and
-                                                 sound, out of the retail
-                                                 NOLF.exe's resources
-  discextract.py goty       <isodir> <outdir>    the Game of the Year text
-                                                 our CRes.dll is built with,
-                                                 out of the retail one
-  discextract.py reference  <isodir> <refdir>    the retail engine images
-                                                 and game DLLs, for scoring
-                                                 only
-  discextract.py audit      <gamedir>            every PE file in a game
-                                                 directory, with its origin
+  retailextract.py resources   <retaildir> <gamedir>  game DATA only (no binary)
+  retailextract.py thirdparty  <retaildir> <gamedir>  Miles + Bink, nothing else
+  retailextract.py launcherres <retaildir> <resdir>   the launcher's art and
+                                                      sound, out of the retail
+                                                      NOLF.exe's resources
+  retailextract.py goty        <retaildir> <outdir>   the Game of the Year text
+                                                      our CRes.dll is built
+                                                      with, out of the retail
+                                                      one
+  retailextract.py reference   <retaildir> <refdir>   the retail engine images
+                                                      and game DLLs, for
+                                                      scoring only
+  retailextract.py audit       <gamedir>              every PE file in a game
+                                                      directory, with its
+                                                      origin
 
-<isodir> holds NOLF1-CD1.iso and NOLF1-CD2.iso.
+<retaildir> is the Game of the Year Edition (Europe) as the rez/ submodule
+installs it from the two disc images (rez/install-games.sh nolf-eu-goty:
+rez/games/nolf-eu-goty/, see build/retail.sh). It is only read: nothing in it
+is run, and the build never writes to it.
 
-`resources` is build/all.sh's first step. It copies every file of the disc's
-Game/ directory that is not a Windows executable image (PE files are
+`resources` is build/all.sh's first step. It copies every file of the play
+disc's Game/ directory that is not a Windows executable image (PE files are
 recognised by their content, the "MZ" header, not by their name), the movie
-files, and the four .rez archives the retail startup.txt stacks. The archives
+files, and the four .rez archives the retail startup.txt stacks. (rez/
+installs Game/ into the directory's top level, beside the .rez archives and
+EReg/, which the build does not use.) The archives
 are game data, but three of them also carry the retail game DLLs
 (CSHELL.dll, OBJECT.lto, CRES.dll, SRES.dll): those entries are overwritten
 with zeros in our copy -- the archive stays valid, the binary is gone -- so
@@ -30,18 +37,18 @@ custom/ rez directory, which the engine searches last-first).
 `thirdparty` copies the licensed middleware the engine imports and we have
 no source for: Miles Sound System (mss32.dll and its .flt / .m3d / .asi /
 .as6 providers) and Bink (binkw32.dll). These are the only binaries from the
-discs that go into the game, and they come only from here.
+retail game that go into ours, and they come only from here.
 
 `launcherres` writes the six binary resources launcher.rc includes from
 src/engine/launcher/res/ -- the splash bitmap and its palette, the music,
 the icon and two cursors. They are Monolith's art and sound, not code, so
 they are not in this repository: they are read out of the resource section
-of the retail NOLF.exe on the disc (the image is parsed in memory, never
+of the retail NOLF.exe (the image is parsed in memory, never
 written anywhere or run) and written back as the .bmp / .pal / .wav / .ico
 / .cur files rc.exe compiles into our NOLF.exe.
 
 `goty` writes the two things the retail Game of the Year CRES.dll (in
-NOLFGOTY.REZ on disc 1) has and Monolith's v1.003 source of it does not: the
+NOLFGOTY.REZ) has and Monolith's v1.003 source of it does not: the
 string tables of the Game of the Year content (string IDs 30000-30095: the
 "Rest and Relaxation" mission's name, briefing, objectives, intel and
 subtitles), as goty.rc, and its credits text, as credits.txt. build/build.sh
@@ -67,31 +74,31 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from isoextract import Iso  # noqa: E402
+import shutil
+
 from rezextract import Rez  # noqa: E402
 
-DISC1, DISC2 = "NOLF1-CD1.iso", "NOLF1-CD2.iso"
-
 # The rez stack of the retail GOTY install, as nolfcmds.txt names it
-# (startup.txt lists more names; the ones not on the discs are skipped).
+# (startup.txt lists more names; the ones the GOTY install lacks are
+# skipped): the installed archive, and its name in the game directory.
 REZ = [
-    (DISC2, "Data/NOLF.REZ",     "nolf.rez"),
-    (DISC1, "Data/NOLF2.REZ",    "nolf2.rez"),
-    (DISC1, "Data/nolfu003.rez", "nolfu003.rez"),
-    (DISC1, "Data/NOLFGOTY.REZ", "nolfgoty.rez"),
+    ("NOLF.REZ",     "nolf.rez"),
+    ("NOLF2.REZ",    "nolf2.rez"),
+    ("nolfu003.rez", "nolfu003.rez"),
+    ("NOLFGOTY.REZ", "nolfgoty.rez"),
 ]
 
 # THIRD-PARTY RUNTIME: lithtech.exe and NOLF.exe import mss32.dll (Miles),
 # and Miles loads its filter/3D/codec providers from the game directory;
 # lithtech.exe loads binkw32.dll for the movies. No source exists for any of
-# them, and the game cannot start without Miles. Nothing else from the discs
-# may be a binary.
+# them, and the game cannot start without Miles. Nothing else from the retail
+# game may be a binary.
 THIRD_PARTY_NAMES = {"mss32.dll", "binkw32.dll"}
 THIRD_PARTY_EXTS = {".flt", ".m3d", ".asi", ".as6"}
 
 # The retail images the checks compare against (`reference`).
 REFERENCE = ["lithtech.exe", "server.dll", "d3d.ren", "NOLF.exe", "ltmsg.dll"]
-# ... and the retail game DLLs, which the discs only hold inside the .rez
+# ... and the retail game DLLs, which the retail game only holds inside the .rez
 # archives (the game loads them from there). There are three generations:
 # NOLF2.REZ has the original release's, nolfu003.rez the 1.003 update's, and
 # NOLFGOTY.REZ the Game of the Year Edition's -- the copies the GOTY install
@@ -110,32 +117,48 @@ def is_third_party(name):
     return n in THIRD_PARTY_NAMES or os.path.splitext(n)[1] in THIRD_PARTY_EXTS
 
 
-class Disc:
-    def __init__(self, isodir, name):
-        path = os.path.join(isodir, name)
-        if not os.path.exists(path):
-            sys.exit(f"missing {path} -- see ISOS/SHA256SUMS")
-        self.name = name
-        self.iso = Iso(path)
-        self.files = {p: (ext, sz) for p, ext, sz in self.iso.walk()}
+class Retail:
+    """The installed retail game, read only. rez/ records where each of its
+    files came from in its MANIFEST.txt (`<path>\t<image>.iso:<disc path>`);
+    `game(p)` is whether a file is one of the play disc's Game/ directory,
+    which rez/ installs into the top level."""
+
+    def __init__(self, root):
+        self.root = Path(root)
+        man = self.root / "MANIFEST.txt"
+        if not man.exists():
+            sys.exit(f"missing {man} -- install the retail game first "
+                     "(build/retail.sh)")
+        self.name = self.root.name
+        self.origin = {}
+        for line in man.read_text().splitlines():
+            if "\t" in line and not line.startswith("#"):
+                rel, origin = line.split("\t", 1)
+                self.origin[rel] = origin.split(".iso:", 1)[-1]
 
     def find(self, path):
-        for p in self.files:
+        for p in self.origin:
             if p.lower() == path.lower():
                 return p
-        sys.exit(f"{self.name}: no {path}")
+        sys.exit(f"{self.root}: no {path}")
 
-    def head(self, path, n=2):
-        ext, sz = self.files[path]
-        self.iso.f.seek(ext * 2048)
-        return self.iso.f.read(min(n, sz))
+    def game(self, p):
+        return "/" not in p and self.origin[p].split("/", 1)[0].lower() == "game"
 
-    def copy(self, path, dest):
-        ext, sz = self.files[path]
+    def size(self, p):
+        return (self.root / p).stat().st_size
+
+    def head(self, p, n=2):
+        with open(self.root / p, "rb") as f:
+            return f.read(n)
+
+    def read(self, p):
+        return (self.root / p).read_bytes()
+
+    def copy(self, p, dest):
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_name(dest.name + ".part")
-        with open(tmp, "wb") as out:
-            self.iso.read_file(ext, sz, out)
+        shutil.copyfile(self.root / p, tmp)
         tmp.replace(dest)
 
 
@@ -183,58 +206,57 @@ def scrub_rez(path):
     return hits
 
 
-def cmd_resources(isodir, gamedir):
+def cmd_resources(retaildir, gamedir):
     gamedir = Path(gamedir)
     gamedir.mkdir(parents=True, exist_ok=True)
     man = Manifest(gamedir)
+    r = Retail(retaildir)
     skipped = []
-    for disc_name in (DISC2,):
-        d = Disc(isodir, disc_name)
-        for p in sorted(d.files):
-            top, _, rest = p.partition("/")
-            if top not in ("Game", "Movies") or not rest or "/" in rest:
-                continue
-            rel = rest if top == "Game" else f"Movies/{rest}"
-            if rest.lower() in NOT_COPIED:
-                continue
-            if d.head(p) == b"MZ":
-                if not is_third_party(rest):
-                    skipped.append(p)
-                continue          # third-party binaries: `thirdparty` step
-            dest = gamedir / rel
-            if not dest.exists() or dest.stat().st_size != d.files[p][1]:
-                d.copy(p, dest)
-            man.add(rel, f"data {disc_name}:{p}")
-    discs = {}
-    for disc_name, src, name in REZ:
-        d = discs.get(disc_name) or discs.setdefault(disc_name, Disc(isodir, disc_name))
-        p = d.find(src)
+    for p in sorted(r.origin):
+        top, _, rest = p.partition("/")
+        if r.game(p):
+            rel = p
+        elif top == "Movies" and rest and "/" not in rest:
+            rel = p
+        else:
+            continue
+        if p.lower() in NOT_COPIED:
+            continue
+        if r.head(p) == b"MZ":
+            if not is_third_party(p):
+                skipped.append(p)
+            continue          # third-party binaries: `thirdparty` step
+        dest = gamedir / rel
+        if not dest.exists() or dest.stat().st_size != r.size(p):
+            r.copy(p, dest)
+        man.add(rel, f"data {r.name}:{p}")
+    for src, name in REZ:
+        p = r.find(src)
         dest = gamedir / name
-        if not dest.exists() or dest.stat().st_size != d.files[p][1]:
-            print(f"== {disc_name}:{p} -> {name}")
-            d.copy(p, dest)
+        if not dest.exists() or dest.stat().st_size != r.size(p):
+            print(f"== {r.name}:{p} -> {name}")
+            r.copy(p, dest)
         for ename, _pos, sz in scrub_rez(dest):
             print(f"   {name}: retail binary {ename} ({sz} bytes) zeroed")
-        man.add(name, f"data {disc_name}:{p} (game binaries inside zeroed)")
+        man.add(name, f"data {r.name}:{p} (game binaries inside zeroed)")
     man.save()
     for p in skipped:
-        print(f"   not copied (a retail binary): {DISC2}:{p}")
+        print(f"   not copied (a retail binary): {r.name}:{p}")
 
 
-def cmd_thirdparty(isodir, gamedir):
+def cmd_thirdparty(retaildir, gamedir):
     gamedir = Path(gamedir)
     gamedir.mkdir(parents=True, exist_ok=True)
     man = Manifest(gamedir)
-    d = Disc(isodir, DISC2)
+    r = Retail(retaildir)
     n = 0
-    for p in sorted(d.files):
-        top, _, rest = p.partition("/")
-        if top != "Game" or "/" in rest or not is_third_party(rest):
+    for p in sorted(r.origin):
+        if not r.game(p) or not is_third_party(p):
             continue
-        dest = gamedir / rest
-        if not dest.exists() or dest.stat().st_size != d.files[p][1]:
-            d.copy(p, dest)
-        man.add(rest, f"THIRD-PARTY {DISC2}:{p}")
+        dest = gamedir / p
+        if not dest.exists() or dest.stat().st_size != r.size(p):
+            r.copy(p, dest)
+        man.add(p, f"THIRD-PARTY {r.name}:{p}")
         n += 1
     man.save()
     print(f"== third-party runtime: {n} files (Miles, Bink)")
@@ -325,14 +347,10 @@ def cursor_file(res, group):
     return head + body
 
 
-def cmd_launcherres(isodir, resdir):
-    import io
-    d = Disc(isodir, DISC2)
-    p = d.find("Game/NOLF.exe")
-    buf = io.BytesIO()
-    ext, sz = d.files[p]
-    d.iso.read_file(ext, sz, buf)
-    res = pe_resources(buf.getvalue())
+def cmd_launcherres(retaildir, resdir):
+    r = Retail(retaildir)
+    p = r.find("NOLF.exe")
+    res = pe_resources(r.read(p))
     out = {
         "game1.bmp": bmp_file(res[(RT_BITMAP, "GAME1")]),
         "game1.pal": res[("PALETTE", "GAME1")],
@@ -347,32 +365,12 @@ def cmd_launcherres(isodir, resdir):
         dest = resdir / name
         if not dest.exists() or dest.read_bytes() != data:
             dest.write_bytes(data)
-    print(f"== {DISC2}:{p} resources -> {resdir}/ ({', '.join(out)})")
-
-
-class _Window:
-    """A read-only view of [start, start + size) of a file, as a file."""
-
-    def __init__(self, f, start, size):
-        self.f, self.start, self.size, self.pos = f, start, size, 0
-
-    def seek(self, pos, whence=0):
-        self.pos = pos if whence == 0 else (self.pos + pos if whence == 1 else self.size + pos)
-
-    def tell(self):
-        return self.pos
-
-    def read(self, n=-1):
-        n = self.size - self.pos if n < 0 else min(n, self.size - self.pos)
-        self.f.seek(self.start + self.pos)
-        data = self.f.read(n)
-        self.pos += len(data)
-        return data
+    print(f"== {r.name}:{p} resources -> {resdir}/ ({', '.join(out)})")
 
 
 # The GOTY string blocks: string IDs 30000-30095 are blocks 1876-1881 (a block
 # holds IDs 16*(n-1) .. 16*(n-1)+15). These are exactly what the retail DLL has
-# and ours lacks (tools/rsrcdiff.py); refuse a disc where that is not so.
+# and ours lacks (tools/rsrcdiff.py); refuse a retail DLL where that is not so.
 GOTY_STRING_BLOCKS = range(1876, 1882)
 RT_STRING = 6
 
@@ -399,29 +397,27 @@ def rc_string(s):
     return '"' + "".join(out) + '"'
 
 
-def cmd_goty(isodir, outdir):
+def cmd_goty(retaildir, outdir):
     import struct
-    from rezextract import Rez
-    d = Disc(isodir, DISC1)
-    p = d.find("Data/NOLFGOTY.REZ")
-    ext, sz = d.files[p]
-    rez = Rez(_Window(d.iso.f, ext * 2048, sz))
+    r = Retail(retaildir)
+    p = r.find("NOLFGOTY.REZ")
+    rez = Rez(str(r.root / p))
     img = None
     for path, pos, size in rez.walk():
         if path.lower() == "cres.dll":
             rez.f.seek(pos)
             img = rez.f.read(size)
     if img is None:
-        sys.exit(f"discextract: no CRES.dll in {DISC1}:{p}")
+        sys.exit(f"retailextract: no CRES.dll in {r.name}:{p}")
     res = pe_resources(img)
-    lines = ["// Generated by tools/discextract.py goty from the retail Game of the",
+    lines = ["// Generated by tools/retailextract.py goty from the retail Game of the",
              "// Year CRES.dll -- do not edit, not committed.", "",
              "STRINGTABLE DISCARDABLE", "BEGIN"]
     n = 0
     for blk in GOTY_STRING_BLOCKS:
         data = res.get((RT_STRING, blk))
         if data is None:
-            sys.exit(f"discextract: the retail CRES.dll has no string block {blk}")
+            sys.exit(f"retailextract: the retail CRES.dll has no string block {blk}")
         o = 0
         for i in range(16):
             ln = struct.unpack_from("<H", data, o)[0]
@@ -434,7 +430,7 @@ def cmd_goty(isodir, outdir):
     lines += ["END", ""]
     credits = res.get(("TEXT", "CREDITS"))
     if credits is None:
-        sys.exit("discextract: the retail CRES.dll has no CREDITS text")
+        sys.exit("retailextract: the retail CRES.dll has no CREDITS text")
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     rc = "\r\n".join(lines).encode("cp1252")
@@ -442,31 +438,29 @@ def cmd_goty(isodir, outdir):
         dest = outdir / name
         if not dest.exists() or dest.read_bytes() != data:
             dest.write_bytes(data)
-    print(f"== {DISC1}:{p} CRES.dll -> {outdir}/goty.rc ({n} strings), credits.txt")
+    print(f"== {r.name}:{p} CRES.dll -> {outdir}/goty.rc ({n} strings), credits.txt")
 
 
-def cmd_reference(isodir, refdir):
+def cmd_reference(retaildir, refdir):
     refdir = Path(refdir)
     refdir.mkdir(parents=True, exist_ok=True)
-    d = Disc(isodir, DISC2)
+    r = Retail(retaildir)
     for name in REFERENCE:
-        p = d.find(f"Game/{name}")
+        p = r.find(name)
         dest = refdir / name
-        d.copy(p, dest)
-        print(f"== {DISC2}:{p} -> {dest}")
-    from rezextract import Rez
-    d = Disc(isodir, DISC1)
-    p = d.find("Data/NOLFGOTY.REZ")
-    ext, sz = d.files[p]
-    rez = Rez(_Window(d.iso.f, ext * 2048, sz))
+        r.copy(p, dest)
+        print(f"== {r.name}:{p} -> {dest}")
+    p = r.find("NOLFGOTY.REZ")
+    rez = Rez(str(r.root / p))
     found = {path.lower(): (pos, size) for path, pos, size in rez.walk()}
     for name, out in REFERENCE_GAME:
         if name.lower() not in found:
-            sys.exit(f"discextract: no {name} in {DISC1}:{p}")
+            sys.exit(f"retailextract: no {name} in {r.name}:{p}")
         pos, size = found[name.lower()]
         rez.f.seek(pos)
         (refdir / out).write_bytes(rez.f.read(size))
-        print(f"== {DISC1}:{p}:{name} -> {refdir / out}")
+        print(f"== {r.name}:{p}:{name} -> {refdir / out}")
+    rez.f.close()
 
 
 def cmd_audit(gamedir):

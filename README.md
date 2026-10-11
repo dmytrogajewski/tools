@@ -56,9 +56,8 @@ the client will regress the server.
 
 | Tool | Used by | What it does |
 |---|---|---|
-| `discextract.py` | `build/all.sh`, `build/reference.sh` | Takes what is needed off the disc images: `resources` (game data, with the retail game DLLs inside the `.rez` archives zeroed), `thirdparty` (Miles and Bink, the only binaries not built from source), `launcherres` (the launcher's bitmap, palette, music, icon and cursors, read out of the retail `NOLF.exe`'s resources), `reference` (the retail engine images, for checking only: `out/reference/`) and `audit` (lists every PE file in the game directory with its origin, and fails on any it cannot account for). |
-| `isoextract.py` | `discextract.py` | Minimal ISO 9660 / Joliet reader. Also a CLI: `isoextract.py list <iso>`. |
-| `rezextract.py` | `discextract.py` | Reader for Monolith's REZ archives. Also a CLI: `rezextract.py list <rez>`. |
+| `retailextract.py` | `build/all.sh`, `build/reference.sh` | Takes what is needed from the retail game, as `rez/` installs it (`rez/games/nolf-eu-goty/`, see `build/retail.sh`): `resources` (game data, with the retail game DLLs inside the `.rez` archives zeroed), `thirdparty` (Miles and Bink, the only binaries not built from source), `launcherres` (the launcher's bitmap, palette, music, icon and cursors, read out of the retail `NOLF.exe`'s resources), `reference` (the retail engine images, for checking only: `out/reference/`) and `audit` (lists every PE file in the game directory with its origin, and fails on any it cannot account for). |
+| `rezextract.py` | `retailextract.py` | Reader for Monolith's REZ archives. Also a CLI: `rezextract.py list <rez>`. |
 | `dsp2files.py` | `build/build.sh` | Lists a VC6 `.dsp` project's source files for one configuration, so the game DLLs compile exactly the files the original project did. |
 | `mkimplib.py` | `build/engine.sh` | Writes a COFF import library for a few named imports (Miles' decorated names, `DirectDrawCreateEx`). |
 | `mkaliasobj.py` | `build/engine.sh` | Turns `src/engine/*/link/aliases.rsp` into an object of weak externals: one function or global reached under two names. |
@@ -69,7 +68,7 @@ the client will regress the server.
 | `playtest-basic.txt` | `make test` | The input script: skip the opening cinematic, look, move, jump, duck, fire, switch weapons, open the menu, quicksave and quickload. |
 | `releasesrc.py` | `build/env.sh` (`libs.sh`, `build.sh`, `engine.sh`) | The source the release build compiles: `sync` mirrors `src/` into `out/release-tree/src/` with every `NOLFSRC_MODERN`/`NOLFSRC_DEBUG` block resolved as the release build sees it, `outputs` copies build outputs between the trees, `strip <file>` prints one file as the release build compiles it, and `diff [rev]` lists the release-visible changes to `src/` since `rev` (lines added outside a block). See BUILDING.md, "The modern build". |
 | `mapaddr.py` | by hand | Names the function an address falls in, from a linker `.map`: for the frames of the debug build's crash log that no `.pdb` names (`tools/mapaddr.py out/nolf-legacy-debug/d3d.map 0x10036d1c`). See BUILDING.md, "The debug build". |
-| `agentwt.sh` | by hand | Creates a git worktree under `.worktrees/<name>` that can build and verify on its own (the compilers, `out/reference/` and the disc images linked in), so several people or agents can work in parallel without one's half-finished edit changing what another measures. Each worktree is a branch, `wt/<name>`: commit verified work there and merge it from the main checkout (`rm` keeps the branch). `agentwt.sh add <name>`, `rm <name>`, `list`. |
+| `agentwt.sh` | by hand | Creates a git worktree under `.worktrees/<name>` that can build and verify on its own (the compilers, `out/reference/` and the installed retail game linked in), so several people or agents can work in parallel without one's half-finished edit changing what another measures. Each worktree is a branch, `wt/<name>`: commit verified work there and merge it from the main checkout (`rm` keeps the branch). `agentwt.sh add <name>`, `rm <name>`, `list`. |
 
 ## Scoring
 
