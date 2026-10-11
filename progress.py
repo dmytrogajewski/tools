@@ -1231,6 +1231,15 @@ def _rows_for_image(label, exe_path, objs):
             paired[a] = n
             placed_at[n] = a
             placed_names.add(fname(n))
+            # ... and every other name at its address in our own link, as
+            # for the placements above: icl's /Qip `X$$1` is a second label
+            # at X's own offset (both at 0 of one COMDAT, a zero-length
+            # "function"), so once X is joined by name (big1ef30's
+            # sub_1001ef30, big4b720's sub_1004b720, d3dqip2's
+            # sub_1003ad30) its $$1 is that same placed function, not a
+            # surplus one -- and must not take a free address of its own.
+            if n in ours_at:
+                our_placed.add(ours_at[n])
             free.discard(a)
             NEAR_PAIRS.append((label, a, sizes.get(a, 0), n,
                                body_len(funcs[n][0])))
