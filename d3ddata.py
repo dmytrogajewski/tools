@@ -419,7 +419,11 @@ def gather():
 
 def _claim(sym, named):
     """The address a function's name claims, exactly as tools/d3dcheck.py
-    reads it: an address in the leaf, else in the class, else NAMED."""
+    reads it: its full name in SYMBOLS, else an address in the leaf, else in
+    the class, else NAMED."""
+    from d3dcheck import SYMBOLS
+    if sym in SYMBOLS:
+        return SYMBOLS[sym]
     parts = re.sub(r"^\?", "", sym).split("@")
     leaf = parts[0]
     m = re.search(r"(1[0-9a-f]{7})", leaf)

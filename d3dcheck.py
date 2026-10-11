@@ -72,6 +72,19 @@ NAMED = {
     "r_TransferTexture": 0x1003A080,
 }
 
+# Template members by their FULL mangled name: a stock header's instantiation
+# (dynarray.h, object_bank.h) carries no address, and its leaf (`Term`,
+# `AllocVoid`) is shared by every instantiation, so NAMED's leaf match cannot
+# hold it.  Exact symbol -> shipped address, with the evidence.
+SYMBOLS = {
+    # ObjectBank<Node56ab4>'s vtable 0x100897d0 (+0x00 ??_G, +0x04 AllocVoid,
+    # +0x08 FreeVoid, +0x0c Term), instantiated by d3dr5b.cpp (/Os /Qip).
+    "??_G?$ObjectBank@UNode56ab4@@VNullCS@@@@UAEPAXI@Z": 0x10050CC0,
+    "?AllocVoid@?$ObjectBank@UNode56ab4@@VNullCS@@@@UAEPAXXZ": 0x10050DA0,
+    "?FreeVoid@?$ObjectBank@UNode56ab4@@VNullCS@@@@UAEXPAX@Z": 0x10050DC0,
+    "?Term@?$ObjectBank@UNode56ab4@@VNullCS@@@@UAEXXZ": 0x10050DE0,
+}
+
 # Compiler-generated, no address of their own to check against.
 # (A `qip_` prefix used to be skipped too: it fronted the deliberately wrong
 # placeholder callees of the /Qip TUs. The last one, d3dqip.cpp's
@@ -147,7 +160,7 @@ def main():
             m = re.search(r"(1[0-9a-f]{7})", leaf)
             if not m and len(parts) > 1:
                 m = re.search(r"(1[0-9a-f]{7})", parts[1])
-            a = int(m.group(1), 16) if m else \
+            a = int(m.group(1), 16) if m else SYMBOLS.get(sym) or \
                 next((v for k, v in sorted(NAMED.items(),
                                            key=lambda kv: -len(kv[0]))
                       if k in leaf), None)

@@ -88,7 +88,7 @@ SMALL_SYMS = {}
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from objdiff import parse_obj  # noqa: E402
 from libextract import extract  # noqa: E402
-from d3dcheck import strip_pad, NAMED as D3D_NAMED  # noqa: E402
+from d3dcheck import strip_pad, NAMED as D3D_NAMED, SYMBOLS as D3D_SYMBOLS  # noqa: E402
 from exematch import parse_obj_masked, find  # noqa: E402
 from exedump import Pe  # noqa: E402
 from enumfuncs import Image as EnumImage, enumerate_functions  # noqa: E402
@@ -687,7 +687,8 @@ PADS = [
 def _own_addr(label, n, funcs=None):
     """The shipped address a symbol of ours names: `sub_<addr>` (the d3d
     convention), or for d3d.ren an engine name tools/d3dcheck.py's NAMED
-    table maps (d3d_IsInOptimized2D -> 0x10034c60). None if it names none.
+    table maps (d3d_IsInOptimized2D -> 0x10034c60), or a template member its
+    SYMBOLS table maps by full name. None if it names none.
     Only ever a preference: a placement there still needs the bytes to
     agree.
 
@@ -700,6 +701,8 @@ def _own_addr(label, n, funcs=None):
     functions of similar length agreeing on 9% of their bytes."""
     m = re.search(r"sub_(1[0-9a-f]{7})", n)
     a = int(m.group(1), 16) if m else None
+    if a is None and label == "d3d.ren":
+        a = D3D_SYMBOLS.get(n.split(":", 1)[-1])
     if a is None and label == "d3d.ren":
         leaf = re.sub(r"^\?", "", n.split(":", 1)[-1]).split("@")[0]
         for k, v in sorted(D3D_NAMED.items(), key=lambda kv: -len(kv[0])):
