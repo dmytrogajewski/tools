@@ -45,7 +45,7 @@ END = "<!-- progress:end -->"
 # (tools/progress.py). Neither may go up.
 COVERAGE = ("unwritten", "unplaced")
 
-LIBS = ["StdLith", "CryptMgr", "RegMgr", "MFCStub", "ButeMgrNoMFC",
+LIBS = ["StdLith", "CryptMgr", "RegMgr", "RegMgr_Debug", "MFCStub", "ButeMgrNoMFC",
         "ltguimgr_LT2", "LithFontMgr_LT2"]
 # The README's rows: (label, what it is, the targets it adds up)
 ROWS = [
@@ -53,7 +53,7 @@ ROWS = [
     ("`server.dll`", "the server", ["server.dll"]),
     ("`d3d.ren`", "the Direct3D renderer", ["d3d.ren"]),
     ("`NOLF.exe`", "the launcher", ["NOLF.exe"]),
-    ("lithshared", "the seven shared libraries", LIBS),
+    ("lithshared", "the shared libraries", LIBS),
     ("`CShell.dll`", "the game: client", ["CShell.dll"]),
     ("`Object.lto`", "the game: server objects", ["Object.lto"]),
 ]

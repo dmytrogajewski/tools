@@ -36,8 +36,8 @@ The engine images (lithtech.exe, server.dll, d3d.ren, NOLF.exe) come off the
 disc into out/reference/ (`tools/discextract.py reference`), and so do the
 Game of the Year game DLLs (CShell.dll, Object.lto, CRes.dll, out of
 NOLFGOTY.REZ); CRes.dll holds no code of Monolith's, so it is scored
-resource by resource instead (rows_for_resources); the seven
-lithshared libraries are compared per COFF symbol against Monolith's prebuilt
+resource by resource instead (rows_for_resources); the lithshared
+libraries (and RegMgr's Debug build) are compared per COFF symbol against Monolith's prebuilt
 .libs from the NOLF Source Code v1.003 release, found through $NOLF_SOURCE
 and checked against progress/shipped-libs.sha256. Without NOLF_SOURCE the
 libraries are left out and only the images are scored.
@@ -107,17 +107,21 @@ OUT = "out/progress"
 DATA = "progress"
 
 # lithshared libraries: (label, ours.lib); theirs is SHIPPED_LIB in the
-# source release
+# source release, or SHIPPED_AS's path (relative to SHIPPED_LIB's directory)
 LIBS = [
     ("StdLith",         "src/lithshared/out/StdLith.lib"),
     ("CryptMgr",        "src/lithshared/out/CryptMgr.lib"),
     ("RegMgr",          "src/lithshared/out/RegMgr.lib"),
+    ("RegMgr_Debug",    "src/lithshared/out/RegMgr_Debug.lib"),
     ("MFCStub",         "src/lithshared/out/MFCStub.lib"),
     ("ButeMgrNoMFC",    "src/lithshared/out/ButeMgrNoMFC.lib"),
     ("ltguimgr_LT2",    "src/lithshared/out/ltguimgr_LT2.lib"),
     ("LithFontMgr_LT2", "src/lithshared/out/LithFontMgr_LT2.lib"),
 ]
 SHIPPED_LIB = "LT2/lithshared/libs/Release/{}.lib"
+# The GOTY CShell.dll linked the Debug build of RegMgr (build/libs.sh), so
+# that one is scored against the release's Debug library.
+SHIPPED_AS = {"RegMgr_Debug": "../Debug/RegMgr.lib"}
 SHIPPED_SUMS = DATA + "/shipped-libs.sha256"
 
 
@@ -125,8 +129,8 @@ def shipped_lib_dir():
     """The directory holding the source release's prebuilt .libs, or None.
 
     $NOLF_SOURCE is the extracted NOLF Source Code v1.003 release (the
-    directory holding LT2/); a directory holding the .libs themselves is
-    accepted too. Every library is checked against SHIPPED_SUMS: a library
+    directory holding LT2/); a directory holding the Release .libs themselves
+    is accepted too, with the Debug ones (SHIPPED_AS) in ../Debug. Every library is checked against SHIPPED_SUMS: a library
     from another release would score against the wrong ground truth, so a
     mismatch is fatal rather than a skip.
     """
@@ -397,7 +401,7 @@ def load_lib(path):
 
 
 def rows_for_lib(label, ours_path, libdir):
-    theirs = load_lib(os.path.join(libdir, label + ".lib"))
+    theirs = load_lib(os.path.join(libdir, SHIPPED_AS.get(label, label + ".lib")))
     ours = load_lib(os.path.join(REPO, ours_path)) if os.path.exists(
         os.path.join(REPO, ours_path)) else {}
     rows = []
@@ -488,18 +492,23 @@ _EXCLUDE_IMAGE = {
     "lithtech": "lithtech.exe",
     "server":   "server.dll",
     "d3d":      "d3d.ren",
+    "cshell":   "CShell.dll",
+    "object":   "Object.lto",
 }
 
 
 def _exclude_files(label):
     """The screen-exclude files whose rows apply to image `label`."""
-    if label in GAME_LABELS:
-        return []          # every one of them is about an engine image
     out = []
     for f in sorted(glob.glob(DATA + "/*-screen-exclude.csv")):
         prefix = os.path.basename(f)[:-len("-screen-exclude.csv")]
         img = _EXCLUDE_IMAGE.get(prefix)
-        if img is None or label is None or img == label:
+        if label in GAME_LABELS:
+            # only the game DLL's own file: the engine files' addresses
+            # overlap the game DLLs' 0x10000000 range by coincidence
+            if img == label:
+                out.append(f)
+        elif img is None or label is None or img == label:
             out.append(f)
     return out
 
@@ -877,9 +886,11 @@ def _rows_for_image(label, exe_path, objs):
             del PLACED_SYMS[(label, at)]
             continue
         mod, sym = PLACED_SYMS[(label, at)].split(":", 1)
-        if "?$" in sym or sym.startswith("??_G"):
-            # template instances and deleting dtors are emitted by every
-            # object that uses them and fold anywhere; they place nothing
+        if "?$" in sym or sym.startswith(("??_G", "??_D")):
+            # template instances, deleting dtors and the iostream classes'
+            # vbase dtors (ButeMgr's ??_Dstrstream matches the game objects'
+            # copy at CShell 0x10085de0) are emitted by every object that
+            # uses them and fold anywhere; they place nothing
             continue
         l0, h0 = lib_span.get(mod, (at, at))
         lib_span[mod] = (min(l0, at), max(h0, at + matched[at]))
@@ -887,6 +898,22 @@ def _rows_for_image(label, exe_path, objs):
         mod = n.split(":", 1)[0]
         if mod not in lib_span and mod not in lib_range:
             del tiny[n]
+    # In a game DLL a library's block also takes in the unmatched addresses
+    # around its anchored span, up to the nearest function matched from
+    # anything else (or the end of .text): a library's first or last
+    # function can be one too short to anchor (CryptMgr's 3-byte
+    # ??0CCryptMgr ahead of its SetKey, LithBitmapFont::IsChromaKeyed after
+    # its ClipFont), and the span alone leaves it no address to claim.
+    lib_block = dict(lib_span)
+    if label in GAME_LABELS:
+        def foreign(a, mod):
+            return (PLACED_SYMS.get((label, a)) or "").split(":", 1)[0] != mod
+        order = sorted(matched)
+        for mod, (l0, h0) in lib_span.items():
+            below = [a + matched[a] for a in order if a < l0 and foreign(a, mod)]
+            above = [a for a in order if a >= h0 and foreign(a, mod)]
+            lib_block[mod] = (max(below) if below else tva,
+                              min(above) if above else tva + len(text))
 
     # Second oracle: our own whole-exe link. exematch has to mask relocation
     # bytes because it compares an unlinked .obj, which leaves the global
@@ -954,7 +981,7 @@ def _rows_for_image(label, exe_path, objs):
                 continue
             if n in from_lib:
                 mod = n.split(":", 1)[0]
-                l0, h0 = lib_range.get(mod) or lib_span[mod]
+                l0, h0 = lib_range.get(mod) or lib_block[mod]
                 if not l0 <= a < h0:
                     continue
             if sizes.get(a) != end:            # same length, exactly
@@ -1014,9 +1041,22 @@ def _rows_for_image(label, exe_path, objs):
     paired = {}
     occurs = {}        # symbol -> its bytes occur somewhere in the image
     rejected = 0
+    # A library function in a game DLL whose bytes are found nowhere is one
+    # of the few its own library's score has as near (zErrHandler::set_ef,
+    # LithBitmapFont::FindOffset and Draw_Method_Timed): the shipped .lib's
+    # copy is what the image links, so pair it the same way, but only inside
+    # its library's block and only if our own link has it.
+    lib_near_ok = set()
+    if label in GAME_LABELS:
+        layout_syms = {sym for (_o, sym) in (_our_layout(label) or {})}
+        lib_near_ok = {n for n in funcs if n in from_lib and
+                       n.split(":", 1)[0] in lib_block and
+                       re.sub(r"@[^@]+\.obj$", "", n.split(":", 1)[1])
+                       in layout_syms}
     if not from_lib is None:
         for n, (code, mask) in sorted(funcs.items()):
-            if len(code) - len(mask) < 8 or n in from_lib:
+            if len(code) - len(mask) < 8 or \
+                    (n in from_lib and n not in lib_near_ok):
                 continue
             occurs[n] = bool(list(find(text, tva, code, mask))) or bool(
                 n in unpadded and list(find(text, tva, *unpadded[n])))
@@ -1035,8 +1075,11 @@ def _rows_for_image(label, exe_path, objs):
             cand = starts
             if a0 is not None and a0 in start_set:
                 cand = [a0] + [a for a in starts if a != a0]
+            blk = lib_block.get(n.split(":", 1)[0]) if n in from_lib else None
             for a in cand:
                 if a in matched or a in paired or not in_app(label, a, lo, hi):
+                    continue
+                if blk and not blk[0] <= a < blk[1]:
                     continue
                 m = sizes.get(a, 0)
                 if not m or abs(m - end) > 0.15 * max(m, end):
