@@ -1,6 +1,6 @@
 # p4-jukebox.txt -- playtest script for the modern build's jukebox (M-P4-02):
 #   PLAYTEST_SCRIPT=tools/p4-jukebox.txt PLAYTEST_NAME=p4-jukebox \
-#       tools/playtest.sh out/game-modern 'Worlds\T01S01'
+#       tools/playtest.sh out/nolf-modern-release 'Worlds\T01S01'
 # From the game: Escape -> Options -> Jukebox, play a piece of the first
 # theme, then one of the last (Game of the Year) theme, leave the jukebox and
 # go back to the game. Keyboard only.

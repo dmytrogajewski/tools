@@ -160,7 +160,7 @@ table per image (`<image-stem>-functions.csv`). Every check and every
 hand-run tool reads them from there -- `build/engine.sh ... verify`, the
 `*-one` loops, `tools/progress.py`, and the defaults of `exedump.py`,
 `fndiff.py`, `nearscan.py` and the rest. Never point a tool at one of our own
-builds (`src/engine/*/Release/*.dll|.exe|.ren`, `out/game/`): it will read our
+builds (`src/engine/*/Release/*.dll|.exe|.ren`, `out/nolf-legacy-release/`): it will read our
 code back and report a match that proves nothing.
 
 ```sh

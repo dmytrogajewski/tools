@@ -2,7 +2,7 @@
 # skips into play, then screenshots the HUD, the weapon chooser and the
 # in-game menu. Start on Worlds\T01S01:
 #   PLAYTEST_RES=1280x720 PLAYTEST_CFG=<file with "UIScale" "1.000000"> \
-#       PLAYTEST_SCRIPT=tools/p3-hud.txt tools/playtest.sh out/game-modern
+#       PLAYTEST_SCRIPT=tools/p3-hud.txt tools/playtest.sh out/nolf-modern-release
 window 180
 wait 15
 shot loaded

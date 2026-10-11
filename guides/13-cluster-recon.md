@@ -10,7 +10,7 @@ agent working one cluster.
 
 1. **Ground truth is the retail image in `out/reference/`**
    (`build/reference.sh`). Never read a function out of one of our own builds
-   (`src/engine/lithtech/Release/lithtech.exe`, `out/game/`): that hands you
+   (`src/engine/lithtech/Release/lithtech.exe`, `out/nolf-legacy-release/`): that hands you
    your own bytes back as the oracle, and the function looks solved when it is
    not.
 2. **NEVER GUESS.** Every field name, offset, constant and control-flow

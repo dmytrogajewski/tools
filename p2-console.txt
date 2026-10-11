@@ -1,6 +1,6 @@
 # p2-console.txt -- the modern build's developer console (MODERN.md, P2),
 # for tools/playtest.sh (PLAYTEST_SCRIPT=tools/p2-console.txt) on a modern
-# game directory (out/game-modern). Opens the console with the key left of
+# game directory (out/nolf-modern-release). Opens the console with the key left of
 # 1, runs Help (the engine's command list, through the console hook of
 # M-P0-02), an unknown command (the engine's own reply), Cheats, then turns
 # on big head mode and trigger boxes, and closes the console again.

@@ -5,7 +5,7 @@
 # the winter bystander's second skin. Cate's setup animation (M-P4-05) shows
 # on entering.
 #   PLAYTEST_SCRIPT=tools/p4-player.txt PLAYTEST_NAME=p4-player \
-#       tools/playtest.sh out/game-modern 'Worlds\T01S01'
+#       tools/playtest.sh out/nolf-modern-release 'Worlds\T01S01'
 window 180
 wait 15
 skipcine 90

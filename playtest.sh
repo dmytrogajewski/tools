@@ -6,7 +6,7 @@
 #   PLAYTEST_SCRIPT=tools/playtest-basic.txt tools/playtest.sh [gamedir] [world]
 #
 # gamedir:    a complete game directory, as build/all.sh assembles it
-#             (default out/game). It is tested exactly as it is: every
+#             (default out/nolf-legacy-release). It is tested exactly as it is: every
 #             binary in it runs, nothing is substituted or filled in.
 # world:      a world path inside the .rez stack (default Worlds\T01S01);
 #             "-" starts without one (the game opens on its main menu)
@@ -96,7 +96,7 @@ if [ "${1:-}" = compare ]; then
     [ ${#L[@]} -gt 0 ] && montage -label '%d/%f' -pointsize 9 "${L[@]}" -tile 2x -geometry 320x240+2+2 compare-$A-$B.png
     exit
 fi
-GAMEDIR="${1:-out/game}"
+GAMEDIR="${1:-out/nolf-legacy-release}"
 WORLD="${2:-Worlds\\T01S01}"
 SCRIPT="${PLAYTEST_SCRIPT:-}"
 if [ -n "$SCRIPT" ]; then SECS="${3:-0}"; else SECS="${3:-60}"; fi

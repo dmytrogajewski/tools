@@ -6,7 +6,7 @@
 # 640x480 layout positions ("mclick x y"), which the runner maps to the
 # window for the build being tested. Start without a world:
 #   PLAYTEST_RES=1280x720 PLAYTEST_MAP=modern PLAYTEST_SCRIPT=tools/p3-menus.txt \
-#       tools/playtest.sh out/game-modern -
+#       tools/playtest.sh out/nolf-modern-release -
 # (PLAYTEST_MAP=retail, the default, for the release build.)
 window 180
 wait 25

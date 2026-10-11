@@ -136,7 +136,7 @@ A byte-identical function needs no runtime test: it *is* the shipped code. A
 therefore not shown to be correct. The whole links close that gap: every
 engine image is linked from our objects alone (`build/engine.sh
 server-link`, `lithtech-link`, `d3d-link`), `make` assembles them into
-`out/game/`, and `make test` plays levels on them. Every near we have written
+`out/nolf-legacy-release/`, and `make test` plays levels on them. Every near we have written
 runs there, beside every identical function. `server-link test` and
 `d3d-link test` load a single linked image under Wine on its own.
 

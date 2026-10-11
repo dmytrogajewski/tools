@@ -6,7 +6,7 @@
 # sets the mode again: under tools/playtest.sh's 1024x768 Xvfb display the
 # only modes are 1024x768, so the window becomes desktop-sized and
 # borderless.
-#   PLAYTEST_SCRIPT=tools/p1-options.txt tools/playtest.sh out/game-modern
+#   PLAYTEST_SCRIPT=tools/p1-options.txt tools/playtest.sh out/nolf-modern-release
 window 180
 wait 15
 skipcine 90

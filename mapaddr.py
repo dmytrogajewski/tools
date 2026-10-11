@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Name the function an address falls in, from a linker .map file.
 
-For the debug build's crash log (out/game-debug/nolfsrc.log): a frame the
+For the debug build's crash log (out/nolf-legacy-debug/nolfsrc.log): a frame the
 .pdb files cannot name -- the static CRT, or a d3d.ren function compiled with
 /Qip, for which Intel C/C++ 4.0 writes no debug information -- is logged with
 its address at the image's preferred base, "(0x10036d1c in its .map)". This
 looks that address up in the map the debug build puts beside the binary.
 
-  tools/mapaddr.py out/game-debug/d3d.map 0x10036d1c [0x... ...]
+  tools/mapaddr.py out/nolf-legacy-debug/d3d.map 0x10036d1c [0x... ...]
 """
 import re
 import sys
