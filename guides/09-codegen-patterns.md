@@ -732,10 +732,10 @@ compiler's build number; a `.lib` keeps its objects' symbol tables, so for a
 library the attribution is per object and needs no inference at all.
 `tools/compid.py` reads it out of a `.lib` or an `.obj` — and reading it back
 off something you just compiled is the quickest way to confirm a `CL_REV`
-override took effect. See [COMPILERS.md](../toolchain/COMPILERS.md).
+override took effect. See [COMPILERS.md](../toolchains/COMPILERS.md).
 
 
-`toolchain/COMPILERS.md` is the per-artifact map — read it before diagnosing
+`toolchains/COMPILERS.md` is the per-artifact map — read it before diagnosing
 any near. The summary, as the build scripts pin it:
 
 | artifact | compiler | flags | where it is set |
@@ -744,20 +744,20 @@ any near. The summary, as the build scripts pin it:
 | `server.dll` | cl **8447** | `/O1`, no `/GX`; `localdriver.cpp` `/Os /Ob1` | `build/engine.sh server` |
 | `lithtech.exe` | cl **8447** | `/O2`; `clientmusic.cpp` without `/GF`, its `localdriver.cpp` `/Od /Oi /Ob1`, `controlfile.cpp` `/GX /O2` | `build/engine.sh lithtech` |
 | `d3d.ren` | Intel C/C++ **4.0** (`icl`) | per-file groups: `/O2` or `/Os`, with `/Qip`, `/Qip_no_inlining`, `/Oi-`, `/Qrcd`, `/Qsfalign16`, `/G5` | `build/engine.sh` (`d3d_flags`) |
-| game DLLs, `NOLF.exe`, `ltmsg.dll`, `sres.dll` | `toolchain/msvc600` (SP6) | `/O2 /GX` | `build/build.sh`, `build/engine.sh` |
+| game DLLs, `NOLF.exe`, `ltmsg.dll`, `sres.dll` | `toolchains/msvc-6.00-9782` (SP6) | `/O2 /GX` | `build/build.sh`, `build/engine.sh` |
 
 `CL_REV=8168` or `CL_REV=8447` in front of any build command overrides the
 revision (`build/env.sh`), which is how revision questions are tested rather
 than presumed. `NOLF.exe`'s Rich header names revisions (8797, 8569) that are
-not in `toolchain/`.
+not in `toolchains/`.
 
 `server.dll` is a **mixed-revision build** (see `tools/richhdr.py`): 146 C and
 8 C++ objects from 8168 alongside 95 C++ objects from 8447. Our 8447 matches
-the 8447 bulk byte-for-byte but not the 8168 TUs. And the `msvc600` default's
+the 8447 bulk byte-for-byte but not the 8168 TUs. And the `msvc-6.00-9782` default's
 real back end is c2 12.00.9782 (SP6) behind an 8804 driver banner — `c2.dll`'s
 version resource is the truth, not `cl.exe`'s. Some measurements below also
 name revisions 8804 and 8966, which were tried during the reconstruction but
-are not part of `toolchain/`.
+are not part of `toolchains/`.
 
 One negative result worth keeping: the theory that "8168 preserves loop shape
 and keeps cold blocks at their lexical position" was **falsified** once the

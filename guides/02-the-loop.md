@@ -155,7 +155,7 @@ a comment next to the function.
 Before you do, two cheap checks that have both turned a "near" back into a
 match: rebuild under the other compiler revisions we hold
 (`CL_REV=8168 build/engine.sh server-one ...`, `CL_REV=8447`, and the
-`msvc600` default), and confirm every call in the function pushes exactly
+`msvc-6.00-9782` default), and confirm every call in the function pushes exactly
 what the retail call pushes. Anything else is a real difference -- keep
 going, and add what you learn to
 [09-codegen-patterns](09-codegen-patterns.md).

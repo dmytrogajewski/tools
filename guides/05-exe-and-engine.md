@@ -96,7 +96,7 @@ byte-matching it; [06-worked-example-engine](06-worked-example-engine.md)
 shows how that was found and what the tells look like. The other targets have
 their own compilers and flags (lithtech.exe cl 8447 `/O2`, d3d.ren Intel
 C/C++ 4.0 with per-file flag groups); the header of `build/engine.sh` lists
-them, and `toolchain/COMPILERS.md` gives the evidence.
+them, and `toolchains/COMPILERS.md` gives the evidence.
 
 `build/engine.sh` builds each target and, with `verify`, runs `exematch` on
 every object:

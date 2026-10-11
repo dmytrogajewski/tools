@@ -41,7 +41,7 @@ declared rather than filled in.
 Three companion documents sit outside this directory and are worth reading
 once: [`BUILDING.md`](../BUILDING.md) explains the build and how to run parts
 of it, [`tools/README.md`](../tools/README.md) what each tool does and when
-you reach for it, and [`toolchain/COMPILERS.md`](../toolchain/COMPILERS.md)
+you reach for it, and [`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md)
 which compiler revision built which binary.
 
 ## Start here
@@ -132,15 +132,15 @@ The flags decide everything before you start:
 | target | compiler | optimisation |
 |---|---|---|
 | lithshared libraries | cl 8447 | `/O2` |
-| game DLLs (`CShell.dll`, `Object.lto`, `CRes.dll`) | cl (default `msvc600`) | `/O2` |
+| game DLLs (`CShell.dll`, `Object.lto`, `CRes.dll`) | cl (default `msvc-6.00-9782`) | `/O2` |
 | `server.dll` | cl 8447 | `/O1` (one file `/Os`) |
 | `lithtech.exe` | cl 8447 | `/O2` (a few files with their own flags) |
 | `d3d.ren` | Intel C/C++ 4.0 | per-file groups (`/O2`, `/Os`, `/Qip`, ...) |
-| `NOLF.exe`, `ltmsg.dll`, `sres.dll` | cl (default `msvc600`) | `/O2` |
+| `NOLF.exe`, `ltmsg.dll`, `sres.dll` | cl (default `msvc-6.00-9782`) | `/O2` |
 
 The build scripts already use the right compiler and flags for every file
 (`build/engine.sh`'s header lists them); the evidence for each choice is in
-[`toolchain/COMPILERS.md`](../toolchain/COMPILERS.md). Check it before
+[`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md). Check it before
 diagnosing a near.
 
 ## Never change what the retail code does

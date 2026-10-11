@@ -7,7 +7,8 @@
 # A plain `git worktree add` is not enough, because what the build needs is
 # not tracked:
 #
-#   toolchain/        the compilers (`make toolchain`; gitignored)
+#   toolchains/       the compilers (a submodule, not checked out in a
+#                     worktree)
 #   out/reference/    the retail images the checks compare against
 #                     (build/reference.sh)
 #   ISOS/*.iso        the disc images (build/reference.sh, build/all.sh)
@@ -16,8 +17,8 @@
 # checkout (.worktrees/<name>, gitignored), and the build container mounts
 # the checkout at /repo, so a relative link resolves both on the host and in
 # the container. An absolute host path would not resolve in the container.
-# toolchain/ stays a real directory (it has tracked files); each compiler
-# tree in it is linked, and .gitignore's /toolchain/* already ignores those.
+# toolchains/ stays a real directory (the submodule's, uninitialised in a
+# worktree); each compiler tree in it is linked.
 #
 # The worktree is a new branch, wt/<name>, started at HEAD (or at the given
 # start point -- another branch, e.g. a wt/ branch to build on): uncommitted
@@ -51,10 +52,11 @@ add)
             git -C "$REPO" worktree add -q -b "wt/$name" "$dir" "${3:-HEAD}"
         fi
     fi
-    # the compiler trees, one link each, beside toolchain/'s tracked files
-    for t in "$REPO"/toolchain/*/; do
+    # the compiler trees, one link each, inside the worktree's toolchains/
+    mkdir -p "$dir/toolchains"
+    for t in "$REPO"/toolchains/*/; do
         t="$(basename "$t")"
-        [ -e "$dir/toolchain/$t" ] || ln -s "../../../toolchain/$t" "$dir/toolchain/$t"
+        [ -e "$dir/toolchains/$t" ] || ln -s "../../../toolchains/$t" "$dir/toolchains/$t"
     done
     mkdir -p "$dir/out"
     [ -L "$dir/out/reference" ] || ln -s ../../../out/reference "$dir/out/reference"
@@ -70,7 +72,7 @@ add)
 rm)
     name="${2:?usage: agentwt.sh rm <name>}"
     # the links first, so nothing can reach through them to the real trees
-    find "$WTROOT/$name/toolchain" "$WTROOT/$name/out" -maxdepth 1 -type l -delete 2>/dev/null || true
+    find "$WTROOT/$name/toolchains" "$WTROOT/$name/toolchain" "$WTROOT/$name/out" -maxdepth 1 -type l -delete 2>/dev/null || true
     rm -f "$WTROOT/$name"/ISOS/*.iso
     git -C "$REPO" worktree remove --force "$WTROOT/$name" 2>/dev/null || rm -rf "$WTROOT/$name"
     git -C "$REPO" worktree prune

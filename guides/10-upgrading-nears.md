@@ -316,7 +316,7 @@ class of cause.
 1. **Is it the right function?** Read the shipped disassembly. Element sizes,
    field offsets and string references identify it in seconds.
 2. **Is it a compiler revision?** Rebuild the file at the other revision
-   (`CL_REV=8168` or `8447`; `toolchain/README.md` lists what is held), e.g.
+   (`CL_REV=8168` or `8447`; `toolchains/README.md` lists what is held), e.g.
    `CL_REV=8168 build/engine.sh server-one <file.cpp>`. Cheap, and it has
    flipped whole functions before. It has never flipped a
    function in `collection.cpp` or `worldsim.cpp`, so do not bother again on
@@ -400,7 +400,7 @@ python3 tools/richhdr.py out/reference/lithtech.exe   # a PE image's inventory
 python3 tools/compid.py  <the shipped .lib>           # a library's exact per-object answer
 ```
 
-`toolchain/COMPILERS.md` records what each binary was built with and the
+`toolchains/COMPILERS.md` records what each binary was built with and the
 evidence for it.
 
 **Then sweep it per translation unit.** A mixed-revision image means some

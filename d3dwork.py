@@ -2,7 +2,7 @@
 """Rank d3d.ren's remaining functions by what it is worth doing next.
 
 THE COMPILER IS KNOWN. d3d.ren was built by Intel C/C++ 4.0 at /O2 (see
-toolchain/COMPILERS.md), and it reproduces byte-for-byte including the
+toolchains/COMPILERS.md), and it reproduces byte-for-byte including the
 compiler's own alignment padding. Everything this file used to treat as a
 blocker -- the frame pointer, `xor %eax,%eax; inc %eax`, the dummy stack
 slot, the lea-nop padding, arguments passed in registers -- is simply what

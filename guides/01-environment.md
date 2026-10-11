@@ -3,19 +3,19 @@
 To reproduce Monolith's bytes you must compile with the compilers they used:
 **Microsoft Visual C++ 6.0** -- several revisions of it, because Monolith did
 not build every binary with the same one -- and, for the renderer `d3d.ren`,
-**Intel C/C++ 4.0**. `make toolchain` assembles all of them into
-`toolchain/` from public copies of the original media (see
-[`toolchain/README.md`](../toolchain/README.md)):
+**Intel C/C++ 4.0**. All of them are in the `toolchains/` submodule
+(`git submodule update --init`), assembled from public copies of the
+original media (see [`toolchains/README.md`](../toolchains/README.md)):
 
 | directory | compiler | used for |
 |---|---|---|
-| `toolchain/msvc600/` | cl 12.00.8804 driver, back end 12.00.9782 (VC6 SP6) | the default; game DLLs, `NOLF.exe`, `ltmsg.dll`, `sres.dll`; and the linker, librarian and resource compiler for everything |
-| `toolchain/msvc-6.00-8447/` | back end 12.00.8447 | `server.dll`, `lithtech.exe`, the lithshared libraries |
-| `toolchain/msvc-6.00-8168/` | back end 12.00.8168 | the headers and libraries `icl` builds against; `CL_REV=8168` experiments |
-| `toolchain/icl-4.0/` | Intel C/C++ 4.0 | `d3d.ren` |
+| `toolchains/msvc-6.00-9782/` | cl 12.00.8804 driver, back end 12.00.9782 (VC6 SP6) | the default; game DLLs, `NOLF.exe`, `ltmsg.dll`, `sres.dll`; and the linker, librarian and resource compiler for everything |
+| `toolchains/msvc-6.00-8447/` | back end 12.00.8447 | `server.dll`, `lithtech.exe`, the lithshared libraries |
+| `toolchains/msvc-6.00-8168/` | back end 12.00.8168 | the headers and libraries `icl` builds against; `CL_REV=8168` experiments |
+| `toolchains/icl-4.0/` | Intel C/C++ 4.0 | `d3d.ren` |
 
 `tools/richhdr.py` reads which revision built each retail image out of the
-image itself; [`toolchain/COMPILERS.md`](../toolchain/COMPILERS.md) has the
+image itself; [`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md) has the
 answers and the evidence.
 
 ## Everything runs in the build container
@@ -75,7 +75,7 @@ The optional last argument narrows the report to the lines naming that symbol.
 
 For anything else, `build/env.sh` defines `run_cl` / `run_icl` / `run_lib` /
 `run_link` / `run_rc`, the compilers under Wine. Setting `CL_REV` before
-sourcing it selects the cl revision (`8168` or `8447`; unset is `msvc600`):
+sourcing it selects the cl revision (`8168` or `8447`; unset is `msvc-6.00-9782`):
 
 ```sh
 cd /repo/src/lithshared/ltguimgr
@@ -103,7 +103,7 @@ old object first; do the same when compiling by hand.
 ## What "the same bytes" requires
 
 - **Same compiler revision** -- the one the original binary was built with
-  ([`toolchain/COMPILERS.md`](../toolchain/COMPILERS.md)); the build scripts
+  ([`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md)); the build scripts
   pin it per target.
 - **Same optimisation and runtime flags** -- per the `.dsp` files for the
   libraries and game DLLs; measured, per file, for the engine.
@@ -138,7 +138,7 @@ file is an easy mistake and it inverts the conclusion.
 | `lithtech.exe` | 7291, 7299, 8168, 8447, 8799 | 8447 ×155 |
 | `d3d.ren` | 7291, 7299, 8168, 8447 | 8168 ×8 and 8447 ×3 -- linked-in library code; the renderer itself was compiled by Intel C/C++, which leaves no Rich entry |
 
-Our own builds with `msvc600` stamp 9782 -- which appears in none of the
+Our own builds with `msvc-6.00-9782` stamp 9782 -- which appears in none of the
 retail images. `NOLF.exe` wants revisions nobody has (8797, 8799), yet the overwhelming majority of its functions match under the
 default compiler anyway: the builds agree on almost everything, so **a near
 match is far more likely to be a source shape you have not found than a
@@ -149,4 +149,4 @@ them matches.
 
 Static libraries have an exact, per-object version of the same evidence: the
 `@comp.id` symbol in every object, which `tools/compid.py` reads (see
-[`toolchain/COMPILERS.md`](../toolchain/COMPILERS.md#a-second-exact-oracle-compid)).
+[`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md#a-second-exact-oracle-compid)).

@@ -210,7 +210,7 @@ are mostly stable, but:
 ## Residual variance — when to accept "near"
 
 We hold three cl back ends (8168, 8447 and the SP6 default, 9782) and
-[`toolchain/COMPILERS.md`](../toolchain/COMPILERS.md) records which one built
+[`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md) records which one built
 each retail binary, so most of what used to look like revision variance can now simply
 be compiled the right way instead. What remains is either a genuine free
 choice the allocator made or a source shape we have not found yet. Mark these

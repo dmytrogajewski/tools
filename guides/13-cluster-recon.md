@@ -179,7 +179,7 @@ evidence must be in the row (see `progress/README.md`).
 
 lithtech.exe's code is MSVC 6 `cl` rev 8447 at `/O2`, which implies `/Oy`:
 **every function is frameless and `%esp`-relative**.
-(`toolchain/COMPILERS.md` and the header of `build/engine.sh` give each
+(`toolchains/COMPILERS.md` and the header of `build/engine.sh` give each
 binary's compiler and the per-file exceptions.)
 
 **ORDERING is source-reachable**: statement order; which arm falls through;
