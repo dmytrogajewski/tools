@@ -971,7 +971,14 @@ def _rows_for_image(label, exe_path, objs):
             return [a0] + [a for a in starts if a != a0]
         return starts
 
-    for n, (code, mask) in sorted(tiny.items()):
+    # Relocation-free functions first: those bytes are the whole function, so
+    # a shape match is exact, while one with a relocation (`mov eax, <addr>;
+    # ret`) fits every sibling of its shape. In name order the second kind
+    # could take the address of the first: Object.lto's 6-byte attribute-name
+    # stubs (`mov eax, "SeeEnemyDistance"; ret` beside `mov eax, 1000; ret`)
+    # took each other's addresses and left 0x10073760 unwritten.
+    for n, (code, mask) in sorted(tiny.items(),
+                                  key=lambda kv: (len(kv[1][1]) > 0, kv[0])):
         # a COMDAT is padded out to alignment; the function is what precedes it
         end = len(code)
         while end > 0 and code[end - 1] in (0x90, 0xCC):
