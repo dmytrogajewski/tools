@@ -139,7 +139,7 @@ The flags decide everything before you start:
 | `NOLF.exe`, `ltmsg.dll`, `sres.dll` | cl (default `msvc-6.00-9782`) | `/O2` |
 
 The build scripts already use the right compiler and flags for every file
-(`build/engine.sh`'s header lists them); the evidence for each choice is in
+(`build/build.mk` lists them); the evidence for each choice is in
 [`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md). Check it before
 diagnosing a near.
 

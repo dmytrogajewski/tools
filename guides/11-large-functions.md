@@ -185,7 +185,7 @@ instruction. Measured with `tools/census.py`:
     big5dca0           969 -> 323    2351 -> 1499          (shipped 1658)
     big40e10          1728 -> 461    2875 -> 1598          (shipped 1669)
 
-`build/engine.sh` carries a `D3D_RCD_TUS` list. If your function's census
+`build/build.mk` carries a `D3D_RCD` group. If your function's census
 shows a family of rows differing by exactly the number of byte lerps, that is
 this, and you should say "needs /Qrcd" rather than treating it as unexplained.
 
@@ -206,9 +206,9 @@ missing calls in the d3d.ren reconstructions.
 **That was wrong. `/Oi-` disables intrinsic expansion and the calls come
 back.** Measured per file, on call agreement, in files that have since been
 merged into others: 46/50 -> 50/50, 29/30 -> 30/30, 30/31 -> 31/31,
-153/164 -> 163/164, 31/39 -> 39/39, 32/44 -> 36/44. `build/engine.sh` carries
-the `/Oi-` flag groups (`D3D_OI_TUS`, and every `w<N>_*_..oi..cpp` suffix);
-read its header for which suffix means what. Add a file to one only after
+153/164 -> 163/164, 31/39 -> 39/39, 32/44 -> 36/44. `build/build.mk` carries
+the `/Oi-` flag groups (`D3D_OI`, and every `w<N>_*_..oi..cpp` suffix);
+its d3d.ren section says which suffix means what. Add a file to one only after
 measuring it: the hand-written `d3d*.cpp` files reproduce bytes at their
 current settings.
 

@@ -21,6 +21,8 @@ build's input.
 
   tools/releasesrc.py strip <file>                 the file as the release build compiles it
   tools/releasesrc.py sync <src> <mirror-src>      bring the mirror up to date
+  tools/releasesrc.py mirror <src> <copy-src>      the same, unstripped: a variant tree's
+                                                   copy (build/variant.sh)
   tools/releasesrc.py outputs <from-src> <to-src>  make <to>'s build outputs match <from>'s
   tools/releasesrc.py diff [rev]                   release-visible changes to src/ since
                                                    <rev> (default HEAD), as a unified diff
@@ -39,7 +41,8 @@ import sys
 VARIANT = ("NOLFSRC_MODERN", "NOLFSRC_DEBUG")
 STRIP_EXT = (".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".inl",
              ".rc", ".rc2", ".asm", ".def", ".idl")
-# build outputs: never mirrored as sources, synced by `outputs`
+# build outputs: never mirrored as sources, synced by `outputs` (and see
+# GENERATED below)
 OUTPUT_DIRS = ("Release", "Final_Release", "Debug")
 LITH_OUT = os.path.join("lithshared", "out")
 
@@ -105,9 +108,19 @@ def stripped_bytes(path, data=None):
     return strip_text(text, path).encode("latin-1")
 
 
+# files the build writes outside those directories (build/build.mk): the
+# generated link inputs, flex's and bison's output, CRes.dll's top resource
+# script
+GENERATED = re.compile(r"^(engine/[^/]+/link/.*\.(obj|lib|cmd)"
+                       r"|game/ObjectDLL/(AnimationLex\.cpp|AnimationParse\.cpp|animationparse\.cpp|AnimationLexSymbols\.h)"
+                       r"|game/ClientRes/goty/cres_goty\.rc)$")
+
+
 def is_output(rel):
     parts = rel.split(os.sep)
     if any(p in OUTPUT_DIRS for p in parts[:-1]):
+        return True
+    if GENERATED.match("/".join(parts)):
         return True
     return rel.startswith(LITH_OUT + os.sep)
 
@@ -133,12 +146,17 @@ def write_if_changed(path, data):
     return True
 
 
-def cmd_sync(src, dst):
+def cmd_sync(src, dst, strip=True):
+    """Make dst's sources those of src (stripped, for the release tree),
+    writing only the files that differ -- the rest keep their times, so the
+    build in dst redoes only what changed -- and leaving dst's build outputs
+    alone."""
     seen, changed = set(), 0
     for rel in walk(src, outputs=False):
         seen.add(rel)
         try:
-            data = stripped_bytes(os.path.join(src, rel))
+            path = os.path.join(src, rel)
+            data = stripped_bytes(path) if strip else read(path)
         except StripError as e:
             sys.exit(f"releasesrc: {e}")
         changed += write_if_changed(os.path.join(dst, rel), data)
@@ -206,6 +224,8 @@ def main():
         n = cmd_sync(a[1], a[2])
         if n:
             print(f"   release tree: {n} source file(s) updated")
+    elif len(a) == 3 and a[0] == "mirror":
+        cmd_sync(a[1], a[2], strip=False)
     elif len(a) == 3 and a[0] == "outputs":
         cmd_outputs(a[1], a[2])
     elif a and a[0] == "diff" and len(a) <= 2:

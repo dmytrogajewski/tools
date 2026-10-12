@@ -743,7 +743,7 @@ any near. The summary, as the build scripts pin it:
 | lithshared libraries | cl **8447** | `/O2 /GX` | `build/libs.sh` |
 | `server.dll` | cl **8447** | `/O1`, no `/GX`; `localdriver.cpp` `/Os /Ob1` | `build/engine.sh server` |
 | `lithtech.exe` | cl **8447** | `/O2`; `clientmusic.cpp` without `/GF`, its `localdriver.cpp` `/Od /Oi /Ob1`, `controlfile.cpp` `/GX /O2` | `build/engine.sh lithtech` |
-| `d3d.ren` | Intel C/C++ **4.0** (`icl`) | per-file groups: `/O2` or `/Os`, with `/Qip`, `/Qip_no_inlining`, `/Oi-`, `/Qrcd`, `/Qsfalign16`, `/G5` | `build/engine.sh` (`d3d_flags`) |
+| `d3d.ren` | Intel C/C++ **4.0** (`icl`) | per-file groups: `/O2` or `/Os`, with `/Qip`, `/Qip_no_inlining`, `/Oi-`, `/Qrcd`, `/Qsfalign16`, `/G5` | `build/build.mk` (`D3D_GROUPS`) |
 | game DLLs, `NOLF.exe`, `ltmsg.dll`, `sres.dll` | `toolchains/msvc-6.00-9782` (SP6) | `/O2 /GX` | `build/build.sh`, `build/engine.sh` |
 
 `CL_REV=8168` or `CL_REV=8447` in front of any build command overrides the

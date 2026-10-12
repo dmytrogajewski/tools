@@ -60,7 +60,8 @@ loops below), or `lithtech.exe` keeps scoring stale objects.
 
 While iterating on a single function you want a tight loop: recompile just
 the one translation unit and check just its object. For the engine targets
-`build/engine.sh` has that built in, with each file's own compiler and flags,
+`build/engine.sh` has that built in, with each file's own compiler and flags
+(from `build/build.mk`),
 in about three seconds:
 
 ```sh

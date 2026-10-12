@@ -8,7 +8,7 @@
 # re-measured whenever functions move between files. Doing that by hand
 # leaves files on the wrong flag.
 #
-# Prints a ready-to-paste D3D_OS_TUS list (build/engine.sh). Run it in the
+# Prints a ready-to-paste list for the D3D_OS group (build/build.mk). Run it in the
 # build container, after build/reference.sh:
 #   make shell, then: tools/d3dflags.sh
 set -u
@@ -54,7 +54,7 @@ for f in src/engine/d3d/*.cpp; do
 done
 
 echo
-echo "D3D_OS_TUS list (paste into build/engine.sh):"
+echo "D3D_OS group (paste into build/build.mk):"
 printf '%s\n' "${best[@]}"
 echo
 echo "NOTE: every object left in Release/ is now whichever flag was measured"
