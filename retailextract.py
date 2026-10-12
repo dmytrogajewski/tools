@@ -320,6 +320,13 @@ def install_directmusic(gamedir, man):
         shutil.copyfile(DIRECTMUSIC_SRC / n, gamedir / ("ms_" + n))
         man.add("ms_" + n, f"THIRD-PARTY Microsoft DirectMusic: toolchains/directmusic-5.3.1.904/{n}")
         print(f"   ms_{n}  <-  toolchains/directmusic-5.3.1.904/{n}")
+    # Windows refuses to start lithtech.exe at all if its manifest is not
+    # well-formed XML (Wine is more forgiving), so check it here.
+    import xml.dom.minidom
+    try:
+        xml.dom.minidom.parse(str(DIRECTMUSIC_MANIFEST))
+    except Exception as e:
+        sys.exit(f"{DIRECTMUSIC_MANIFEST}: not well-formed XML ({e})")
     shutil.copyfile(DIRECTMUSIC_MANIFEST, gamedir / "lithtech.exe.manifest")
     man.add("lithtech.exe.manifest", "ours src/modern/directmusic/lithtech.exe.manifest")
     print("   lithtech.exe.manifest  <-  src/modern/directmusic/")
