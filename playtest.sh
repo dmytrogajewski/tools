@@ -68,6 +68,8 @@
 #                         to fit it (e.g. 1280x720, 1920x1080)
 #   PLAYTEST_CFG=<file>   console variables appended to the run's
 #                         autoexec.cfg (lines like "UIScale" "1.000000")
+#   PLAYTEST_SAVES=<dir>  start a scripted run with a copy of these saved
+#                         games as its Save/ (instead of none)
 # The default keys (defctrls.cfg): WASD move, arrows turn, Space jump,
 # C duck, F / mouse 1 fire, R reload, Shift_L next weapon, 1-0 weapons,
 # E activate, F6 quicksave, F9 quickload, Escape menu.
@@ -121,7 +123,8 @@ echo "game directory: $GAME" > "$RUN/binaries.txt"
 if [ -n "$SCRIPT" ]; then
     cp "$(abs "$SCRIPT")" "$RUN/script.txt" || exit 2
     cp "$GAME/defaults.cfg" "$RUN/autoexec.cfg"
-    mkdir "$RUN/Save"
+    if [ -n "${PLAYTEST_SAVES:-}" ]; then cp -r "$(abs "$PLAYTEST_SAVES")" "$RUN/Save" || exit 2
+    else mkdir "$RUN/Save"; fi
 else
     cp "$GAME/autoexec.cfg" "$RUN/autoexec.cfg" 2>/dev/null || cp "$GAME/defaults.cfg" "$RUN/autoexec.cfg"
     if [ -d "$GAME/Save" ]; then cp -r "$GAME/Save" "$RUN/Save"; else mkdir "$RUN/Save"; fi
