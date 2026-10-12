@@ -104,9 +104,10 @@ SCRIPT="${PLAYTEST_SCRIPT:-}"
 if [ -n "$SCRIPT" ]; then SECS="${3:-0}"; else SECS="${3:-60}"; fi
 abs() { case "$1" in /*) echo "$1" ;; *) echo "$REPO/$1" ;; esac; }
 GAME="$(abs "$GAMEDIR")"
-for f in lithtech.exe server.dll d3d.ren nolfcmds.txt defaults.cfg; do
+for f in lithtech.exe server.dll nolfcmds.txt defaults.cfg; do
     [ -f "$GAME/$f" ] || { echo "$GAME/$f missing -- not a game directory (build/all.sh makes one)"; exit 2; }
 done
+ls "$GAME"/*.ren >/dev/null 2>&1 || { echo "$GAME has no renderer (*.ren) -- not a game directory"; exit 2; }
 NAME="${PLAYTEST_NAME:-$(basename "$GAME")}"
 
 RUN="$REPO/out/play/$NAME"
