@@ -47,6 +47,11 @@ build/all.sh): it removes any retail Miles / Bink file a previous build left
 in the game directory and installs OpenMiles' mss32.dll and our FFmpeg-based
 binkw32.dll, which build/ext.sh built from ext/ into <extdir>. OpenMiles
 decodes and mixes everything itself, so no Miles provider file goes in.
+It also installs Microsoft's DirectMusic DLLs from
+toolchains/directmusic-5.3.1.904/ as ms_<name>.dll, with the
+lithtech.exe.manifest that makes the game use them
+(src/modern/directmusic/README.md); without that directory it installs
+neither and says so.
 
 `launcherres` writes the six binary resources launcher.rc includes from
 src/engine/launcher/res/ -- the splash bitmap and its palette, the music,
@@ -280,6 +285,47 @@ OPEN_RUNTIME = [
 ]
 
 
+# The modern build's DirectMusic (src/modern/directmusic/README.md):
+# Microsoft's DLLs from toolchains/directmusic-5.3.1.904/, installed as
+# ms_<name>.dll, and the manifest that points lithtech.exe's COM at them.
+REPO = Path(__file__).resolve().parent.parent
+DIRECTMUSIC_SRC = REPO / "toolchains" / "directmusic-5.3.1.904"
+DIRECTMUSIC_MANIFEST = REPO / "src" / "modern" / "directmusic" / "lithtech.exe.manifest"
+DIRECTMUSIC = ["dmband.dll", "dmcompos.dll", "dmime.dll", "dmloader.dll", "dmscript.dll",
+               "dmstyle.dll", "dmsynth.dll", "dmusic.dll", "dswave.dll"]
+
+
+def install_directmusic(gamedir, man):
+    """Microsoft's DirectMusic into the game directory, or (without
+    toolchains/directmusic-5.3.1.904/) nothing at all, removing an earlier
+    build's."""
+    import hashlib
+    targets = ["ms_" + n for n in DIRECTMUSIC] + ["lithtech.exe.manifest"]
+    sums = DIRECTMUSIC_SRC / "SHA256SUMS"
+    if not sums.exists():
+        for t in targets:
+            if (gamedir / t).exists():
+                (gamedir / t).unlink()
+                print(f"   removed {t}")
+            man.rows.pop(t, None)
+        print(f"   WARNING: no {DIRECTMUSIC_SRC.relative_to(REPO)}/ -- no DirectMusic in the "
+              "game directory, so no music under Wine/Proton without winetricks "
+              "(src/modern/directmusic/README.md)")
+        return 0
+    want = dict(reversed(line.split()) for line in sums.read_text().splitlines() if line.strip())
+    for n in DIRECTMUSIC:
+        got = hashlib.sha256((DIRECTMUSIC_SRC / n).read_bytes()).hexdigest()
+        if want.get(n) != got:
+            sys.exit(f"{DIRECTMUSIC_SRC / n}: SHA-256 {got} is not the one SHA256SUMS pins")
+        shutil.copyfile(DIRECTMUSIC_SRC / n, gamedir / ("ms_" + n))
+        man.add("ms_" + n, f"THIRD-PARTY Microsoft DirectMusic: toolchains/directmusic-5.3.1.904/{n}")
+        print(f"   ms_{n}  <-  toolchains/directmusic-5.3.1.904/{n}")
+    shutil.copyfile(DIRECTMUSIC_MANIFEST, gamedir / "lithtech.exe.manifest")
+    man.add("lithtech.exe.manifest", "ours src/modern/directmusic/lithtech.exe.manifest")
+    print("   lithtech.exe.manifest  <-  src/modern/directmusic/")
+    return len(targets)
+
+
 def cmd_openruntime(extdir, gamedir):
     gamedir = Path(gamedir)
     gamedir.mkdir(parents=True, exist_ok=True)
@@ -293,8 +339,10 @@ def cmd_openruntime(extdir, gamedir):
         shutil.copyfile(Path(extdir) / name, gamedir / name)
         man.add(name, f"EXT {origin} (build/ext.sh)")
         print(f"   {name}  <-  {origin}")
+    ndm = install_directmusic(gamedir, man)
     man.save()
-    print(f"== open runtime: {len(OPEN_RUNTIME)} files (OpenMiles, Bink on FFmpeg, the OpenGL and Direct3D 9 renderers)")
+    print(f"== open runtime: {len(OPEN_RUNTIME)} files (OpenMiles, Bink on FFmpeg, the OpenGL and Direct3D 9 renderers)"
+          + (f", and {ndm} for Microsoft's DirectMusic" if ndm else ""))
 
 
 # --- launcher resources -----------------------------------------------------
