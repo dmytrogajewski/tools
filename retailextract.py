@@ -275,7 +275,7 @@ def cmd_thirdparty(retaildir, gamedir):
 OPEN_RUNTIME = [
     ("mss32.dll",   "ext/openmiles: OpenMiles, Miles 6.0 exports"),
     ("binkw32.dll", "src/modern/binkw32 + ext/ffmpeg: our Bink player"),
-    ("opengl.ren",  "src/modern/opengl: our OpenGL renderer"),
+    ("opengl.ren",  "src/modern/render: our OpenGL renderer"),
 ]
 
 
