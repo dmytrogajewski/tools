@@ -275,6 +275,7 @@ def cmd_thirdparty(retaildir, gamedir):
 OPEN_RUNTIME = [
     ("mss32.dll",   "ext/openmiles: OpenMiles, Miles 6.0 exports"),
     ("binkw32.dll", "src/modern/binkw32 + ext/ffmpeg: our Bink player"),
+    ("opengl.ren",  "src/modern/opengl: our OpenGL renderer"),
 ]
 
 
@@ -292,7 +293,7 @@ def cmd_openruntime(extdir, gamedir):
         man.add(name, f"EXT {origin} (build/ext.sh)")
         print(f"   {name}  <-  {origin}")
     man.save()
-    print(f"== open runtime: {len(OPEN_RUNTIME)} files (OpenMiles, Bink on FFmpeg)")
+    print(f"== open runtime: {len(OPEN_RUNTIME)} files (OpenMiles, Bink on FFmpeg, the OpenGL renderer)")
 
 
 # --- launcher resources -----------------------------------------------------
@@ -525,7 +526,7 @@ def cmd_audit(gamedir):
     ext = sum(1 for r in rows if r[0].startswith("EXT"))
     third = sum(1 for r in rows if r[0].startswith("THIRD-PARTY"))
     print(f"{len(rows)} PE files: {built} built from our source, "
-          + (f"{ext} open-source middleware built from ext/, " if ext else "")
+          + (f"{ext} built by build/ext.sh (open-source middleware, our renderer), " if ext else "")
           + f"{third} third-party runtime, {bad} unaccounted for")
     return 1 if bad else 0
 
