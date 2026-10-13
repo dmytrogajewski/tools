@@ -13,13 +13,16 @@
 #                     (build/reference.sh)
 #   rez/              the installed retail game the build takes its data
 #                     from (a submodule too; build/retail.sh)
+#   tools/            the build's helpers and these tools (a submodule too)
 #
 # so they are symlinked in, RELATIVELY: the worktree lives inside the
 # checkout (.worktrees/<name>, gitignored), and the build container mounts
 # the checkout at /repo, so a relative link resolves both on the host and in
 # the container. An absolute host path would not resolve in the container.
-# toolchains/ and rez/ stay real directories (the submodules', uninitialised
-# in a worktree); each compiler tree, and each entry of rez/, is linked.
+# toolchains/, rez/ and tools/ stay real directories (the submodules',
+# uninitialised in a worktree); each compiler tree, and each entry of rez/
+# and tools/, is linked. So the main checkout's tools/ is the one every
+# worktree runs: change a tool there, not through a worktree's link.
 #
 # The worktree is a new branch, wt/<name>, started at HEAD (or at the given
 # start point -- another branch, e.g. a wt/ branch to build on): uncommitted
@@ -67,6 +70,12 @@ add)
         t="$(basename "$t")"
         [ -e "$dir/rez/$t" ] || ln -s "../../../rez/$t" "$dir/rez/$t"
     done
+    # tools/: the main checkout's, entry by entry
+    mkdir -p "$dir/tools"
+    for t in "$REPO"/tools/*; do
+        t="$(basename "$t")"
+        [ -e "$dir/tools/$t" ] || ln -s "../../../tools/$t" "$dir/tools/$t"
+    done
     [ -f "$REPO/out/reference/server.dll" ] \
         || echo "note: no out/reference/ yet -- run build/reference.sh in the main checkout"
     echo "host:      $dir"
@@ -76,7 +85,7 @@ add)
 rm)
     name="${2:?usage: agentwt.sh rm <name>}"
     # the links first, so nothing can reach through them to the real trees
-    find "$WTROOT/$name/toolchains" "$WTROOT/$name/rez" "$WTROOT/$name/out" -maxdepth 1 -type l -delete 2>/dev/null || true
+    find "$WTROOT/$name/toolchains" "$WTROOT/$name/rez" "$WTROOT/$name/tools" "$WTROOT/$name/out" -maxdepth 1 -type l -delete 2>/dev/null || true
     git -C "$REPO" worktree remove --force "$WTROOT/$name" 2>/dev/null || rm -rf "$WTROOT/$name"
     git -C "$REPO" worktree prune
     echo "removed $name (branch wt/$name kept)"
