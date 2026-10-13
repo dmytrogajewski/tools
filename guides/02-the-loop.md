@@ -8,7 +8,7 @@ whether you are right -- you diff.
 
 All live in `tools/` and are plain Python 3 (the disassemblers also need
 `objdump` from binutils, which the build container does not have: run those
-on a host with binutils, or install it). [`tools/README.md`](../tools/README.md)
+on a host with binutils, or install it). [`tools/README.md`](../README.md)
 describes every tool; these are the core of the loop.
 
 | Tool | What it does | Use when |
@@ -80,7 +80,7 @@ link it into what uses it as a final check.
 
 The retail lithshared libraries come from Monolith's *NOLF Source Code
 v1.003* release, which you supply yourself (see
-[`progress/README.md`](../progress/README.md#the-libraries-nolf_source)).
+[`progress/README.md`](../../progress/README.md#the-libraries-nolf_source)).
 Start the shell with it, and it is mounted read-only with `$NOLF_SOURCE`
 pointing at it:
 

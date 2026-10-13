@@ -5,7 +5,7 @@ To reproduce Monolith's bytes you must compile with the compilers they used:
 not build every binary with the same one -- and, for the renderer `d3d.ren`,
 **Intel C/C++ 4.0**. All of them are in the `toolchains/` submodule
 (`git submodule update --init`), assembled from public copies of the
-original media (see [`toolchains/README.md`](../toolchains/README.md)):
+original media (see [`toolchains/README.md`](../../toolchains/README.md)):
 
 | directory | compiler | used for |
 |---|---|---|
@@ -15,7 +15,7 @@ original media (see [`toolchains/README.md`](../toolchains/README.md)):
 | `toolchains/icl-4.0/` | Intel C/C++ 4.0 | `d3d.ren` |
 
 `tools/richhdr.py` reads which revision built each retail image out of the
-image itself; [`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md) has the
+image itself; [`toolchains/COMPILERS.md`](../../toolchains/COMPILERS.md) has the
 answers and the evidence.
 
 ## Everything runs in the build container
@@ -104,7 +104,7 @@ old object first; do the same when compiling by hand.
 ## What "the same bytes" requires
 
 - **Same compiler revision** -- the one the original binary was built with
-  ([`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md)); the build scripts
+  ([`toolchains/COMPILERS.md`](../../toolchains/COMPILERS.md)); the build scripts
   pin it per target.
 - **Same optimisation and runtime flags** -- per the `.dsp` files for the
   libraries and game DLLs; measured, per file, for the engine.
@@ -150,4 +150,4 @@ them matches.
 
 Static libraries have an exact, per-object version of the same evidence: the
 `@comp.id` symbol in every object, which `tools/compid.py` reads (see
-[`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md#a-second-exact-oracle-compid)).
+[`toolchains/COMPILERS.md`](../../toolchains/COMPILERS.md#a-second-exact-oracle-compid)).

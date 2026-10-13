@@ -1,5 +1,12 @@
 # tools/
 
+Tools for reconstructing a binary from source until it compiles to the
+bytes that shipped: matching, diffing, enumerating, scoring. They grew up in
+[nolfsrc](https://github.com/nolffan/nolfsrc), the *No One Lives Forever*
+reconstruction, which carries this repository as its `tools/`; much of what
+follows still names that project's binaries and paths, and the aim is for
+the general tools here to serve any project like it.
+
 Everything here serves one of two jobs: building and running the game, or
 proving, function by function, that the C++ in `src/engine/` recompiles to
 exactly the machine code that shipped. The tools are plain Python 3 with no

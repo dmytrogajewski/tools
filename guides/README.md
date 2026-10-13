@@ -1,12 +1,17 @@
 # Reconstruction guides
 
+These guides were written for [nolfsrc](https://github.com/nolffan/nolfsrc),
+the *No One Lives Forever* reconstruction, which carries this repository as
+its `tools/`: paths such as `tools/fndiff.py` and links into `../../` are
+that project's.
+
 How to take one function from a retail NOLF binary and write C++ that the
 original toolchain compiles to **byte-identical machine code**.
 
 This is not a rewrite or a port. The goal is preservation: source that
 reproduces the exact bytes Monolith shipped, verified function by function.
-How far that has got is the table in the top-level [README](../README.md#progress);
-`make progress` re-measures it (see [`progress/README.md`](../progress/README.md)).
+How far that has got is the table in the top-level [README](../../README.md#progress);
+`make progress` re-measures it (see [`progress/README.md`](../../progress/README.md)).
 
 ## The loop
 
@@ -39,9 +44,9 @@ nothing else: guessing is still forbidden, and an undecoded region is still
 declared rather than filled in.
 
 Three companion documents sit outside this directory and are worth reading
-once: [`BUILDING.md`](../BUILDING.md) explains the build and how to run parts
-of it, [`tools/README.md`](../tools/README.md) what each tool does and when
-you reach for it, and [`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md)
+once: [`BUILDING.md`](../../BUILDING.md) explains the build and how to run parts
+of it, [`tools/README.md`](../README.md) what each tool does and when
+you reach for it, and [`toolchains/COMPILERS.md`](../../toolchains/COMPILERS.md)
 which compiler revision built which binary.
 
 ## Start here
@@ -89,13 +94,17 @@ which compiler revision built which binary.
     proven, only its `/O2` shape is wrong (`tools/o2gap.py`).
 13. **[13-cluster-recon](13-cluster-recon.md)** -- the procedure for
     reconstructing a whole untouched cluster of functions from scratch.
+14. **[14-progress](14-progress.md)** -- the scoreboard: building and using
+    `progress/`, checking a change with `make progress`, recording it with
+    `make progress-update`, reading the worklists, correcting the
+    enumeration, and adapting the scorer to another project.
 
 ## Picking a target
 
 `tools/progress.py` scores every function of every target and writes
 `out/progress/functions.csv`: one row per retail function, with its size and
 status (`identical`, `near`, `small`, `attempted`, `todo`, `crt`; see
-[`progress/README.md`](../progress/README.md) for what each means). Run
+[`progress/README.md`](../../progress/README.md) for what each means). Run
 `make progress` (or `python3 tools/progress.py` in `make shell`) first, after
 a `make`.
 
@@ -140,7 +149,7 @@ The flags decide everything before you start:
 
 The build scripts already use the right compiler and flags for every file
 (`build/build.mk` lists them); the evidence for each choice is in
-[`toolchains/COMPILERS.md`](../toolchains/COMPILERS.md). Check it before
+[`toolchains/COMPILERS.md`](../../toolchains/COMPILERS.md). Check it before
 diagnosing a near.
 
 ## Never change what the retail code does
