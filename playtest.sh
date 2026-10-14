@@ -55,6 +55,16 @@
 #                         "modern" (the modern build: the centred 4:3 area,
 #                         scaled by the height; MODERN.md, M-P3-01)
 #   mclick <x> <y>        the same, then a click of button 1
+#   pad [button...] [axis=value...]
+#                         the test gamepad (the modern build's ##gamepad,
+#                         which in a scripted run reads its state from the
+#                         file NOLFSRC_PADTEST names, not from XInput):
+#                         the buttons held from now on -- a b x y lb rb
+#                         back start ls rs up down left right (the d-pad)
+#                         -- and the axes, lx ly rx ry -100..100 (y up
+#                         positive) and lt rt 0..100; what is not named is
+#                         released / centred. `pad` alone: all released;
+#                         `pad off`: no pad connected (the start)
 # After every command the runner checks the game process; if it has died the
 # script stops and the run is judged (EXITED / CRASHED, naming the line).
 # Everything that happened goes to script.log; shots.png is a contact sheet
@@ -181,6 +191,24 @@ if [ -f script.txt ]; then
         set -- $p
         xdotool mousemove $((WX+1+$1)) $((WY+1+$2))
     }
+    # the test gamepad's state -> $NOLFSRC_PADTEST (see `pad`), written
+    # whole and renamed, so the game never reads half a line
+    padset() {
+        local b=0 lx=0 ly=0 rx=0 ry=0 lt=0 rt=0 a v
+        if [ "${1:-}" = off ]; then rm -f "$NOLFSRC_PADTEST"; return; fi
+        for a in "$@"; do
+            case "$a" in
+                up) b=$((b|0x1)) ;; down) b=$((b|0x2)) ;; left) b=$((b|0x4)) ;; right) b=$((b|0x8)) ;;
+                start) b=$((b|0x10)) ;; back) b=$((b|0x20)) ;; ls) b=$((b|0x40)) ;; rs) b=$((b|0x80)) ;;
+                lb) b=$((b|0x100)) ;; rb) b=$((b|0x200)) ;;
+                a) b=$((b|0x1000)) ;; b) b=$((b|0x2000)) ;; x) b=$((b|0x4000)) ;; y) b=$((b|0x8000)) ;;
+                l[xy]=*|r[xy]=*) v=$(( ${a#*=} * 32767 / 100 )); eval "${a%%=*}=$v" ;;
+                l[t]=*|r[t]=*) v=$(( ${a#*=} * 255 / 100 )); eval "${a%%=*}=$v" ;;
+                *) log "  pad: unknown $a" ;;
+            esac
+        done
+        echo "$b $lx $ly $rx $ry $lt $rt" > "$NOLFSRC_PADTEST.part" && mv -f "$NOLFSRC_PADTEST.part" "$NOLFSRC_PADTEST"
+    }
     grab() { xwd -root -silent | convert xwd:- -crop "${WW}x${WH}+${WX}+${WY}" +repage "$@"; }
     # is the HUD up (= the player is in control)? The health bar: red, at
     # x 30..60, y 448..452 of the 640x480 view (scaled to the window size).
@@ -229,6 +257,7 @@ if [ -f script.txt ]; then
             focus) focuswin ;;
             mmove) pagemove "$1" "$2" ;;
             mclick) pagemove "$1" "$2"; sleep 0.4; xdotool mousedown 1; sleep 0.1; xdotool mouseup 1 ;;
+            pad)   padset "$@" ;;
             *)     log "  unknown command: $cmd" ;;
         esac
     done < <(tr -d '\r' < script.txt)
@@ -263,6 +292,8 @@ cd "$RUN" || exit 1
 export WINEDEBUG=${PLAYTEST_WINEDEBUG:--all,+seh} WINEDLLOVERRIDES=${PLAYTEST_DLLOVERRIDES-winedbg.exe=d}
 [ -n "${PLAYTEST_PREFIX:-}" ] && export WINEPREFIX=$PLAYTEST_PREFIX
 export PLAYTEST_MAP="${PLAYTEST_MAP:-retail}"
+# a scripted run's gamepad is the test pad, and starts unplugged (`pad`)
+[ -n "$SCRIPT" ] && export NOLFSRC_PADTEST=padtest.txt
 xvfb-run -a -s "-screen 0 ${SCREEN}x24" bash runner.sh $SECS
 )
 cat "$RUN/result.txt" 2>/dev/null || echo "NO RESULT (the run failed)"

@@ -1,0 +1,50 @@
+# p7-play.txt -- M-P7-03/04/05 check for tools/playtest.sh, run on the
+# modern build in Worlds\M01S01 (the player starts at a window): the test
+# pad (`pad`) turns right with the right stick (about 90 degrees in half a
+# second), part of the way back at 60%, crouches and stands (B, a bound
+# button), jumps (A), runs into the wall ahead (the left stick, full) and
+# walks (40%), opens the menu with Start and goes back with B.
+window
+skipcine 120
+wait 1
+shot start
+pad rx=100
+wait 0.5
+pad
+wait 0.5
+shot turned-right
+pad rx=-60
+wait 0.5
+pad
+wait 0.5
+shot turned-back-part
+pad b
+wait 1
+shot crouching
+pad
+wait 1
+pad a
+wait 0.25
+shot jumping
+pad
+wait 1.5
+pad ly=100
+wait 1.5
+pad
+wait 0.5
+shot ran-forward
+pad ly=40
+wait 1.5
+pad
+wait 0.5
+shot walked-forward
+pad start
+wait 0.3
+pad
+wait 1.5
+shot menu
+pad b
+wait 0.3
+pad
+wait 1.5
+shot resumed
