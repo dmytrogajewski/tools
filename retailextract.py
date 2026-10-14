@@ -114,6 +114,30 @@ OPEN_RUNTIME = [
 ]
 
 
+# A project other than NOLF2 describes its own retail game in build/retail.py
+# (beside the build/retail.sh that installs it), a plain Python file that
+# sets any of the names above: REZ, DATA_DIRS, RETAIL_COPIES,
+# THIRD_PARTY_NAMES, BUILT_ENGINE, REFERENCE, REFERENCE_REZ, REFERENCE_GAME,
+# OPEN_RUNTIME. An entry of REFERENCE_GAME may name its own archive as a
+# third item, (name in the archive, our name, archive), where the retail
+# game keeps its game DLLs in more than one. RETAIL_LAYOUT names the file
+# instead; without either, the values above (NOLF2's) stand.
+def _load_layout():
+    path = os.environ.get("RETAIL_LAYOUT") or os.path.join("build", "retail.py")
+    if not os.path.isfile(path):
+        return
+    ns = {}
+    with open(path) as f:
+        exec(compile(f.read(), path, "exec"), ns)
+    for k in ("REZ", "DATA_DIRS", "RETAIL_COPIES", "THIRD_PARTY_NAMES", "BUILT_ENGINE",
+              "REFERENCE", "REFERENCE_REZ", "REFERENCE_GAME", "OPEN_RUNTIME"):
+        if k in ns:
+            globals()[k] = ns[k]
+
+
+_load_layout()
+
+
 def is_third_party(name):
     return name.lower() in THIRD_PARTY_NAMES
 
@@ -289,17 +313,18 @@ def cmd_reference(retaildir, refdir):
         p = r.find(name)
         r.copy(p, refdir / name)
         print(f"== {r.name}:{p} -> {refdir / name}")
-    p = r.find(REFERENCE_REZ)
-    rez = Rez(str(r.root / p))
-    found = {path.lower(): (pos, size) for path, pos, size in rez.walk()}
-    for name, out in REFERENCE_GAME:
+    for entry in REFERENCE_GAME:
+        name, out = entry[0], entry[1]
+        p = r.find(entry[2] if len(entry) > 2 else REFERENCE_REZ)
+        rez = Rez(str(r.root / p))
+        found = {path.lower(): (pos, size) for path, pos, size in rez.walk()}
         if name.lower() not in found:
             sys.exit(f"retailextract: no {name} in {r.name}:{p}")
         pos, size = found[name.lower()]
         rez.f.seek(pos)
         (refdir / out).write_bytes(rez.f.read(size))
+        rez.f.close()
         print(f"== {r.name}:{p}:{name} -> {refdir / out}")
-    rez.f.close()
 
 
 def cmd_audit(gamedir):
