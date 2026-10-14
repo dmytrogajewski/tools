@@ -127,6 +127,39 @@ SETS = [("Europe", ["eu1", "eu2"]), ("USA", ["us1", "us2"]), ("USA-alt", ["us1",
 SETTINGS = {"autoexec.cfg.retail": "autoexec.cfg",
             "Default.prf.retail": "Profiles/Default.prf"}
 
+# A project other than NOLF2 describes its own discs and update in its
+# build/retail.py (tools/retailextract.py reads the same file), setting any
+# of: INSTALL_RELEASE (rez/'s installed release the game's data came from),
+# INSTALL_UPDATE (the update, as rez/'s patches/<name>), INSTALL_DISCS,
+# INSTALL_ALIASES, INSTALL_REGIONS, INSTALL_SETS (as DISCS ... SETS above),
+# INSTALL_TAG (the word in the scripts' data markers: __<TAG>_INSTALL_DATA__,
+# #__<TAG>_PS__ and the <TAG>INSTALL header line, which the project's
+# build/game-scripts/ must use too) and INSTALL_BAT_HEADER (the .bat's
+# header, as BAT_HEADER below, with <TAG>_SELF, <TAG>_PS1 and <TAG>_RC for
+# its variables). RETAIL_LAYOUT names another file, as for retailextract.
+TAG = "NOLF2"
+RELEASE = "nolf2-eu-1.3"
+
+
+def _load_layout():
+    global RETAIL, UPDATE, DISCS, ALIASES, REGIONS, SETS, TAG, RELEASE, MARKER
+    path = os.environ.get("RETAIL_LAYOUT") or os.path.join("build", "retail.py")
+    if not os.path.isfile(path):
+        return None
+    ns = {}
+    with open(path) as f:
+        exec(compile(f.read(), path, "exec"), ns)
+    RELEASE = ns.get("INSTALL_RELEASE", RELEASE)
+    RETAIL = os.path.join(REZ, "games", RELEASE)
+    UPDATE = ns.get("INSTALL_UPDATE", UPDATE)
+    DISCS = ns.get("INSTALL_DISCS", DISCS)
+    ALIASES = ns.get("INSTALL_ALIASES", ALIASES if "INSTALL_DISCS" not in ns else {})
+    REGIONS = ns.get("INSTALL_REGIONS", REGIONS)
+    SETS = ns.get("INSTALL_SETS", SETS)
+    TAG = ns.get("INSTALL_TAG", TAG)
+    MARKER = f"__{TAG}_INSTALL_DATA__"
+    return ns.get("INSTALL_BAT_HEADER")
+
 
 def sha256(path):
     h = hashlib.sha256()
@@ -373,16 +406,20 @@ def check_way(kind, ranges, size, sha, what):
 
 
 def main():
+    global BAT_HEADER
     if len(sys.argv) not in (3, 4):
         sys.exit(__doc__)
+    bat = _load_layout()
+    if bat is not None:
+        BAT_HEADER = bat.splitlines()
     game, outdir = sys.argv[1].rstrip("/"), sys.argv[2]
     isodir = sys.argv[3] if len(sys.argv) == 4 else os.path.join(REZ, "isos")
     paths = {i: os.path.join(isodir, n + ".iso") for i, n in DISCS.items()}
     missing = [p for p in paths.values() if not os.path.isfile(p)]
     if missing or not os.path.isfile(os.path.join(RETAIL, "MANIFEST.txt")):
-        print("mkinstall: no disc images (%s) or no rez/games/nolf2-eu-1.3/ -- "
-              "rez/fetch-isos.sh nolf2-eu nolf2-usa && rez/install-games.sh nolf2-eu-1.3"
-              % ", ".join(missing or paths.values()), file=sys.stderr)
+        print("mkinstall: no disc images (%s) or no rez/games/%s/ -- "
+              "rez/fetch-isos.sh and rez/install-games.sh"
+              % (", ".join(missing or paths.values()), RELEASE), file=sys.stderr)
         sys.exit(3)
     discs = {i: Disc(i, DISCS[i], p) for i, p in paths.items()}
 
@@ -452,8 +489,8 @@ def main():
         m = re.match(r"(data|THIRD-PARTY) ([^:]+):(.+?)( \(.*\))?$", frm)
         if not m:
             continue
-        if m.group(2) != "nolf2-eu-1.3":
-            sys.exit(f"mkinstall: {rel} came from {m.group(2)}, not nolf2-eu-1.3")
+        if m.group(2) != RELEASE:
+            sys.exit(f"mkinstall: {rel} came from {m.group(2)}, not {RELEASE}")
         wanted[rel] = m.group(3)
     for rel in list(wanted) + list(wanted.values()):
         if re.search(r"[\s\"'`$\\%!]", rel):
@@ -510,7 +547,7 @@ def main():
         path = os.path.join(game, rel)
         ops = ops_for(os.path.join(RETAIL, rp), path)
         if ops is None:
-            sys.exit(f"mkinstall: {rel}: not made from nolf2-eu-1.3:{rp}")
+            sys.exit(f"mkinstall: {rel}: not made from {RELEASE}:{rp}")
         literal += ops.literal
         size, sha = os.path.getsize(path), sha256(path)
         records.append(f"F {rel} {size} {sha} - {sources[rp]}")
@@ -523,7 +560,7 @@ def main():
     if literal > LITERAL_MAX:
         sys.exit(f"mkinstall: {literal} bytes would ship as literal data")
 
-    data = ["NOLF2INSTALL 2"]
+    data = [f"{TAG}INSTALL 2"]
     for i, d in discs.items():
         data.append(f"D {i} {d.size} {d.sha} {d.name}")
         data.append(f"R {i} {d.size // SECTOR * RAW_SECTOR}")
@@ -543,9 +580,10 @@ def main():
     os.chmod(os.path.join(outdir, "linux-install.sh"), 0o755)
 
     ps = open(os.path.join(SCRIPTS, "windows-install.ps1")).read()
-    if not ps.isascii() or "#__NOLF2_PS__" in ps or MARKER in ps:
+    psm = f"#__{TAG}_PS__"
+    if not ps.isascii() or psm in ps or MARKER in ps:
         sys.exit("mkinstall: windows-install.ps1 must be ASCII, without the markers")
-    bat = BAT_HEADER + ["#__NOLF2_PS__"] + ps.splitlines() + ["#__NOLF2_PS__", MARKER] + data
+    bat = BAT_HEADER + [psm] + ps.splitlines() + [psm, MARKER] + data
     with open(os.path.join(outdir, "windows-install.bat"), "w", newline="\r\n") as f:
         f.write("\n".join(bat) + "\n")
 
