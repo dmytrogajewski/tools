@@ -10,7 +10,7 @@ object inside an image has nothing at all.
 Usage:
   compid.py <file.lib|file.obj> [...]
 
-  compid.py "$NOLF_SOURCE"/LT2/lithshared/libs/Release/*.lib   # the shipped libraries
+  compid.py "$NOLF2_SOURCE"/LT2/lithshared/libs/Release/*.lib   # the shipped libraries
   compid.py src/lithshared/out/*.lib                          # ours
 """
 import glob

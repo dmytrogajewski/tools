@@ -28,7 +28,7 @@ One slot per line, in order. A slot may be `0x<hex>` for a literal dword
 an unresolved one is a link error like any other.
 
 Lines between `%ifdef NAME` and `%endif` count only when `--define NAME` is
-given: build/engine.sh passes `--define NOLFSRC_MODERN` in the modern build
+given: build/engine.sh passes `--define NOLF2SRC_MODERN` in the modern build
 (build/variant.sh), whose ILTClient has slots the retail one does not. Without
 it they are skipped, so the release build's object is the same as ever.
 

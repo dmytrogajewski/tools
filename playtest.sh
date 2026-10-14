@@ -6,9 +6,9 @@
 #   PLAYTEST_SCRIPT=tools/playtest-basic.txt tools/playtest.sh [gamedir] [world]
 #
 # gamedir:    a complete game directory, as build/all.sh assembles it
-#             (default out/nolf-legacy-release). It is tested exactly as it is: every
+#             (default out/nolf2-legacy-release). It is tested exactly as it is: every
 #             binary in it runs, nothing is substituted or filled in.
-# world:      a world path inside the .rez stack (default Worlds\T01S01);
+# world:      a world path inside the .rez stack (default Worlds\RetailSinglePlayer\C01S01);
 #             "-" starts without one (the game opens on its main menu)
 # seconds:    how long to let it run before judging (default 60; in script
 #             mode, extra idle seconds after the script, default 0)
@@ -21,12 +21,12 @@
 # autoexec.cfg on exit and the game writes saves). Writes, in that directory:
 #   wine.log   everything Wine and the game printed
 #   shot.png   a screenshot of the virtual display at the end
-#   result.txt ALIVE / EXITED / CRASHED, plus the reason
+#   result.txt ALIVE / EXITED / CRASHED / NO HUD, plus the reason
 # and prints result.txt. Exit status 0 only for ALIVE.
 #
 # Scripted input (PLAYTEST_SCRIPT=<file>): instead of idling, the runner
 # drives the game window with xdotool from a script, one command per line
-# ('#' starts a comment). The run's autoexec.cfg is then the game directory's defaults.cfg
+# ('#' starts a comment). The run's autoexec.cfg is then the shipped one (autoexec.cfg.retail)
 # (the shipped default controls: the game directory's autoexec.cfg can have
 # lost its key bindings) and Save/ starts empty, so every run starts from the same
 # state. Commands:
@@ -46,14 +46,16 @@
 #                         cinematic) and Return (takes the first answer of a
 #                         dialogue decision) in turn, every 3s; returns once
 #                         the HUD has been up for 4s, or after <timeout>
-#                         (default 90s)
+#                         (default 90s); if the HUD never comes up, the
+#                         run is judged NO HUD, a failure
 #   shot <name>           screenshot the game window -> shots/NN-<name>.png
 #   focus                 re-focus the game window
 #   mmove <x> <y>         move the pointer to a point of the menus' 640x480
 #                         page, mapped to the window as PLAYTEST_MAP says:
-#                         "retail" (default: the page centred, unscaled) or
-#                         "modern" (the modern build: the centred 4:3 area,
-#                         scaled by the height; MODERN.md, M-P3-01)
+#                         "retail" (the page centred, unscaled; the default
+#                         for a release build) or "modern" (the centred 4:3
+#                         area, scaled by the height: MODERN.md M-G2; the
+#                         default for a game directory named *modern*)
 #   mclick <x> <y>        the same, then a click of button 1
 # After every command the runner checks the game process; if it has died the
 # script stops and the run is judged (EXITED / CRASHED, naming the line).
@@ -62,10 +64,20 @@
 # replays the same inputs at the same moments on every run -- compare two
 # runs with `playtest.sh compare` (game-side timing, AI and physics still
 # vary, so expect near, not pixel-identical, frames).
+# The game runs full screen on a virtual display of exactly its screen mode
+# (the engine, like retail's, wants a display mode of the window's size
+# even when windowed, and Xvfb offers only its own size), with sound: where
+# there is no sound card (a container), ALSA's default device is its null
+# plugin (an asound.conf in the run directory, through ALSA_CONFIG_PATH),
+# so Wine's DirectSound has an output device and the engine's sound driver
+# initialises and plays, into nothing.
 # Optional settings, from the environment:
-#   PLAYTEST_RES=WxH      the screen mode (32-bit) instead of the game
-#                         directory's 640x480x16; the virtual display grows
-#                         to fit it (e.g. 1280x720, 1920x1080)
+#   PLAYTEST_RES=WxH      the screen mode (32-bit) instead of 640x480x32;
+#                         the virtual display is that size
+#                         (e.g. 1280x720, 1920x1080)
+#   PLAYTEST_WINDOWED=1   a window instead of full screen (Wine's frame
+#                         makes it smaller than the display)
+#   PLAYTEST_ARGS="..."   more engine arguments (e.g. +DisableSound 1)
 #   PLAYTEST_CFG=<file>   console variables appended to the run's
 #                         autoexec.cfg (lines like "UIScale" "1.000000")
 #   PLAYTEST_SAVES=<dir>  start a scripted run with a copy of these saved
@@ -74,8 +86,8 @@
 # C duck, F / mouse 1 fire, R reload, Shift_L next weapon, 1-0 weapons,
 # E activate, F6 quicksave, F9 quickload, Escape menu.
 #
-# Run it inside the build container: `make test` does (the scripted run on
-# T01S01 and M03S01), and `make shell` gives a shell to run it by hand.
+# Run it inside the build container: `make test` does (the main menu), and
+# `make shell` gives a shell to run it by hand.
 #
 #   tools/playtest.sh compare <runA> <runB>
 # compares two scripted runs (directory names under out/play/, e.g. two
@@ -98,16 +110,15 @@ if [ "${1:-}" = compare ]; then
     [ ${#L[@]} -gt 0 ] && montage -label '%d/%f' -pointsize 9 "${L[@]}" -tile 2x -geometry 320x240+2+2 compare-$A-$B.png
     exit
 fi
-GAMEDIR="${1:-out/nolf-legacy-release}"
-WORLD="${2:-Worlds\\T01S01}"
+GAMEDIR="${1:-out/nolf2-legacy-release}"
+WORLD="${2:-Worlds\\RetailSinglePlayer\\C01S01}"
 SCRIPT="${PLAYTEST_SCRIPT:-}"
 if [ -n "$SCRIPT" ]; then SECS="${3:-0}"; else SECS="${3:-60}"; fi
 abs() { case "$1" in /*) echo "$1" ;; *) echo "$REPO/$1" ;; esac; }
 GAME="$(abs "$GAMEDIR")"
-for f in lithtech.exe server.dll nolfcmds.txt defaults.cfg; do
+for f in Lithtech.exe server.dll nolf2cmds.txt autoexec.cfg.retail Default.prf.retail; do
     [ -f "$GAME/$f" ] || { echo "$GAME/$f missing -- not a game directory (build/all.sh makes one)"; exit 2; }
 done
-ls "$GAME"/*.ren >/dev/null 2>&1 || { echo "$GAME has no renderer (*.ren) -- not a game directory"; exit 2; }
 NAME="${PLAYTEST_NAME:-$(basename "$GAME")}"
 
 RUN="$REPO/out/play/$NAME"
@@ -116,32 +127,37 @@ rm -rf "$RUN"; mkdir -p "$RUN"
 REL="$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "$GAME" "$RUN")"
 for f in "$GAME"/*; do
     b=$(basename "$f")
-    case "$b" in autoexec.cfg|Save|nolfcmds.txt|MANIFEST.txt|linux-run.sh|linux-run-launcher.sh|run-cmds.txt|cd) continue ;; esac
+    case "$b" in autoexec.cfg|Save|Profiles|nolf2cmds.txt|MANIFEST.txt|linux-run.sh|linux-run-launcher.sh|run-cmds.txt|launchcmds.txt) continue ;; esac
     if [ -f "$f" ] && [ "$(head -c 2 "$f" | tr -d '\0')" = MZ ]; then cp "$f" "$RUN/$b"
     else ln -s "$REL/$b" "$RUN/$b"; fi
 done
 echo "game directory: $GAME" > "$RUN/binaries.txt"
 if [ -n "$SCRIPT" ]; then
     cp "$(abs "$SCRIPT")" "$RUN/script.txt" || exit 2
-    cp "$GAME/defaults.cfg" "$RUN/autoexec.cfg"
+    cp "$GAME/autoexec.cfg.retail" "$RUN/autoexec.cfg"
+    mkdir "$RUN/Profiles" && cp "$GAME/Default.prf.retail" "$RUN/Profiles/Default.prf"
     if [ -n "${PLAYTEST_SAVES:-}" ]; then cp -r "$(abs "$PLAYTEST_SAVES")" "$RUN/Save" || exit 2
     else mkdir "$RUN/Save"; fi
 else
-    cp "$GAME/autoexec.cfg" "$RUN/autoexec.cfg" 2>/dev/null || cp "$GAME/defaults.cfg" "$RUN/autoexec.cfg"
+    cp "$GAME/autoexec.cfg" "$RUN/autoexec.cfg" 2>/dev/null || cp "$GAME/autoexec.cfg.retail" "$RUN/autoexec.cfg"
+    if [ -d "$GAME/Profiles" ]; then cp -r "$GAME/Profiles" "$RUN/Profiles"
+    else mkdir "$RUN/Profiles" && cp "$GAME/Default.prf.retail" "$RUN/Profiles/Default.prf"; fi
     if [ -d "$GAME/Save" ]; then cp -r "$GAME/Save" "$RUN/Save"; else mkdir "$RUN/Save"; fi
 fi
 # The engine takes the world from the command file, not from arguments after
 # -cmdfile: write a per-run copy with +runworld appended.
-rm -f "$RUN/nolfcmds.txt"
-CMDS="$(tr -d '\r\n' < "$GAME/nolfcmds.txt")"
-SCREEN=1024x768
+rm -f "$RUN/nolf2cmds.txt"
+# (nolf2cmds.txt is the rez stack; the screen mode and the movies are the
+# harness's, as linux-run.sh adds its own)
+CMDS="$(tr -d '\r\n' < "$GAME/nolf2cmds.txt") ++screenwidth 640 ++screenheight 480 ++bitdepth 32 ++windowed ${PLAYTEST_WINDOWED:-0} +DisableMovies 1${PLAYTEST_ARGS:+ $PLAYTEST_ARGS}"
+SCREEN=640x480   # the virtual display: the screen mode (see the header)
 if [ -n "${PLAYTEST_RES:-}" ]; then
     RW=${PLAYTEST_RES%x*}; RH=${PLAYTEST_RES#*x}
     CMDS="$(echo "$CMDS" | sed -E "s/\+\+screenwidth [0-9]+/++screenwidth $RW/; s/\+\+screenheight [0-9]+/++screenheight $RH/; s/\+\+bitdepth [0-9]+/++bitdepth 32/")"
-    SCREEN="$(( RW + 200 > 1024 ? RW + 200 : 1024 ))x$(( RH + 200 > 768 ? RH + 200 : 768 ))"
+    SCREEN="${RW}x${RH}"
 fi
-if [ "$WORLD" = - ]; then printf '%s\n' "$CMDS" > "$RUN/nolfcmds.txt"
-else printf '%s +runworld %s\n' "$CMDS" "$WORLD" > "$RUN/nolfcmds.txt"; fi
+if [ "$WORLD" = - ]; then printf '%s\n' "$CMDS" > "$RUN/nolf2cmds.txt"
+else printf '%s +runworld %s\n' "$CMDS" "$WORLD" > "$RUN/nolf2cmds.txt"; fi
 [ -n "${PLAYTEST_CFG:-}" ] && { cat "$(abs "$PLAYTEST_CFG")" >> "$RUN/autoexec.cfg" || exit 2; }
 
 # The runner, executed inside the container under xvfb-run.
@@ -149,10 +165,10 @@ cat > "$RUN/runner.sh" <<'RUNNER'
 #!/bin/bash
 # $1 = seconds (idle mode: total; script mode: extra after the script)
 SECS=$1
-wine lithtech.exe -cmdfile nolfcmds.txt > wine.log 2>&1 &
+wine Lithtech.exe -cmdfile nolf2cmds.txt > wine.log 2>&1 &
 PID=$!
 alive() { kill -0 $PID 2>/dev/null; }
-STOPPED=""
+STOPPED=""; NOHUD=""
 
 if [ -f script.txt ]; then
     mkdir -p shots
@@ -224,7 +240,8 @@ if [ -f script.txt ]; then
                     xdotool keydown $k; sleep 0.08; xdotool keyup $k; sleep 3
                     [ $k = space ] && k=Return || k=space
                 done
-                log "  skipcine done after $(( $(date +%s) - st ))s" ;;
+                if [ $clear -ge 4 ]; then log "  skipcine done after $(( $(date +%s) - st ))s"
+                else NOHUD="line $LINE"; log "  skipcine: no HUD after $(( $(date +%s) - st ))s"; fi ;;
             shot)  N=$((N+1)); f=$(printf 'shots/%02d-%s.png' $N "$1"); grab "$f"; log "  -> $f" ;;
             focus) focuswin ;;
             mmove) pagemove "$1" "$2" ;;
@@ -244,7 +261,10 @@ else
     WHAT="${SECS}s"
 fi
 xwd -root -silent | convert xwd:- shot.png 2>/dev/null
-if alive; then
+if alive && [ -n "$NOHUD" ]; then
+    echo "NO HUD: alive, but the player never got control (skipcine at $NOHUD)" > result.txt
+    wineserver -k; sleep 2
+elif alive; then
     echo "ALIVE after $WHAT" > result.txt
     wineserver -k; sleep 2
 else
@@ -260,9 +280,15 @@ RUNNER
 
 (
 cd "$RUN" || exit 1
+if [ ! -e /dev/snd ] && [ -f /usr/share/alsa/alsa.conf ]; then
+    printf '</usr/share/alsa/alsa.conf>\npcm.!default { type null }\n' > asound.conf
+    export ALSA_CONFIG_PATH="$RUN/asound.conf"
+fi
 export WINEDEBUG=${PLAYTEST_WINEDEBUG:--all,+seh} WINEDLLOVERRIDES=${PLAYTEST_DLLOVERRIDES-winedbg.exe=d}
 [ -n "${PLAYTEST_PREFIX:-}" ] && export WINEPREFIX=$PLAYTEST_PREFIX
-export PLAYTEST_MAP="${PLAYTEST_MAP:-retail}"
+# the modern build lays its menus out in the centred 4:3 area (MODERN.md M-G2)
+case "$(basename "$GAME")" in *modern*) DEFMAP=modern ;; *) DEFMAP=retail ;; esac
+export PLAYTEST_MAP="${PLAYTEST_MAP:-$DEFMAP}"
 xvfb-run -a -s "-screen 0 ${SCREEN}x24" bash runner.sh $SECS
 )
 cat "$RUN/result.txt" 2>/dev/null || echo "NO RESULT (the run failed)"

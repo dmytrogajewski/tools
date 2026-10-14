@@ -2,18 +2,18 @@
 """The source the release build compiles: src/ without the variant blocks.
 
 The debug and modern builds (build/variant.sh) add code to retail files in
-`#ifdef NOLFSRC_MODERN` / `#ifdef NOLFSRC_DEBUG` blocks. The release build
+`#ifdef NOLF2SRC_MODERN` / `#ifdef NOLF2SRC_DEBUG` blocks. The release build
 never defines either, but a block it skips is still there: its lines move
 everything below them, and VC6 lets that layout decide where it puts some
 out-of-line inline functions. Enough blocks in one file can change the
 release binary although not one release token changed.
 
-So the release build does not compile src/ itself. build/libs.sh,
-build/build.sh and build/engine.sh, started in a checkout, run in
-out/release-tree/ instead (build/env.sh, nolfsrc_release_tree): a copy of
+So the release build does not compile src/ itself. build/compile.sh,
+started in a checkout, runs in
+out/release-tree/ instead (build/env.sh, nolf2src_release_tree): a copy of
 src/ in which every such block is resolved as the release build sees it --
-`#ifdef NOLFSRC_X ... [#else ...] #endif` keeps only the #else part,
-`#ifndef NOLFSRC_X ... [#else ...] #endif` only the first -- with the
+`#ifdef NOLF2SRC_X ... [#else ...] #endif` keeps only the #else part,
+`#ifndef NOLF2SRC_X ... [#else ...] #endif` only the first -- with the
 directives themselves gone. A retail file then reads exactly as it did
 before anything was added to it, provided nothing was added OUTSIDE a block
 (not even a blank line); `diff` shows what a change does to the release
@@ -27,7 +27,7 @@ build's input.
   tools/releasesrc.py diff [rev]                   release-visible changes to src/ since
                                                    <rev> (default HEAD), as a unified diff
 
-Only NOLFSRC_MODERN and NOLFSRC_DEBUG are resolved, and only in the
+Only NOLF2SRC_MODERN and NOLF2SRC_DEBUG are resolved, and only in the
 `#ifdef`/`#ifndef` forms; any other test of them (#if, #elif, defined())
 is an error, so the release build cannot silently compile the wrong side.
 """
@@ -38,19 +38,48 @@ import shutil
 import subprocess
 import sys
 
-VARIANT = ("NOLFSRC_MODERN", "NOLFSRC_DEBUG")
+VARIANT = ("NOLF2SRC_MODERN", "NOLF2SRC_DEBUG")
 STRIP_EXT = (".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".inl",
              ".rc", ".rc2", ".asm", ".def", ".idl")
-# build outputs: never mirrored as sources, synced by `outputs` (and see
-# GENERATED below)
-OUTPUT_DIRS = ("Release", "Final_Release", "Debug")
-LITH_OUT = os.path.join("lithshared", "out")
+# build outputs: never mirrored as sources, synced by `outputs` -- anything
+# in a built/ directory, where Monolith's project files put every output
+# (Game/built/, libs/built/; spelled Built and built alike) -- and see
+# GENERATED below
+OUTPUT_DIRS = ("built",)
 
 DIRECTIVE = re.compile(r"^\s*#\s*(ifdef|ifndef|if|elif|else|endif)\b(.*)$")
 
 
 class StripError(Exception):
     pass
+
+
+def in_comment_after(line, in_comment):
+    """Whether a /* */ comment is still open after this line, given whether
+    one was open before it (string and character literals and // comments
+    are skipped). A directive on a line that starts inside a comment is no
+    directive: retail files keep commented-out #if/#else/#endif blocks."""
+    i, n = 0, len(line)
+    while i < n:
+        if in_comment:
+            j = line.find("*/", i)
+            if j < 0:
+                return True
+            in_comment, i = False, j + 2
+            continue
+        c = line[i]
+        if c in "\"'":
+            i += 1
+            while i < n and line[i] != c:
+                i += 2 if line[i] == "\\" else 1
+            i += 1
+        elif line.startswith("//", i):
+            return False
+        elif line.startswith("/*", i):
+            in_comment, i = True, i + 2
+        else:
+            i += 1
+    return in_comment
 
 
 def strip_text(text, name="<text>"):
@@ -62,8 +91,10 @@ def strip_text(text, name="<text>"):
     # one entry per open conditional: None for one we leave alone, else
     # [keep_now] for a variant block (its directives are dropped)
     stack = []
+    in_comment = False
     for n, line in enumerate(text.split(nl), 1):
-        m = DIRECTIVE.match(line)
+        m = None if in_comment else DIRECTIVE.match(line)
+        in_comment = in_comment_after(line, in_comment)
         keep = all(s is None or s[0] for s in stack)
         if m:
             d, rest = m.group(1), m.group(2)
@@ -111,18 +142,16 @@ def stripped_bytes(path, data=None):
 # files the build writes outside those directories (build/build.mk): the
 # generated link inputs, flex's and bison's output, CRes.dll's top resource
 # script
-GENERATED = re.compile(r"^(engine/[^/]+/link/.*\.(obj|lib|cmd)"
-                       r"|game/ObjectDLL/(AnimationLex\.cpp|AnimationParse\.cpp|animationparse\.cpp|AnimationLexSymbols\.h)"
-                       r"|game/ClientRes/goty/cres_goty\.rc)$")
+# the custom build steps' outputs, written beside their sources
+GENERATED = re.compile(r"^Game/ObjectDLL/ObjectShared/(AnimationLex\.o|AnimationParse\.o|AnimationLexSymbols\.h)$",
+                       re.I)
 
 
 def is_output(rel):
     parts = rel.split(os.sep)
-    if any(p in OUTPUT_DIRS for p in parts[:-1]):
+    if any(p.lower() in OUTPUT_DIRS for p in parts[:-1]):
         return True
-    if GENERATED.match("/".join(parts)):
-        return True
-    return rel.startswith(LITH_OUT + os.sep)
+    return bool(GENERATED.match("/".join(parts)))
 
 
 def walk(root, outputs):
@@ -168,9 +197,9 @@ def cmd_sync(src, dst, strip=True):
 
 
 def cmd_outputs(src, dst):
-    """Make dst's build outputs (Release/, Final_Release/, Debug/,
-    lithshared/out/) the same as src's: copy what differs (size or mtime,
-    mtime kept), delete what src does not have."""
+    """Make dst's build outputs (built/, the generated sources) the same as
+    src's: copy what differs (size or mtime, mtime kept), delete what src
+    does not have."""
     have = set()
     for rel in walk(src, outputs=True):
         have.add(rel)

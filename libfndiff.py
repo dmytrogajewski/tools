@@ -8,14 +8,14 @@ diff, the best callee-saved renaming, the fingerprint hints) for one such
 symbol.
 
 The shipped libraries come from the NOLF Source Code v1.003 release, found
-through $NOLF_SOURCE exactly as tools/progress.py finds them (and checked
+through $NOLF2_SOURCE exactly as tools/progress.py finds them (and checked
 against progress/shipped-libs.sha256); ours from src/lithshared/out/.
 
 Usage:
   libfndiff.py <label> <symbol-substr>          # both libs found by label
   libfndiff.py --list <label>                   # every near in that library
 
-  NOLF_SOURCE=<dir> libfndiff.py ButeMgrNoMFC SetDouble
+  NOLF2_SOURCE=<dir> libfndiff.py ButeMgrNoMFC SetDouble
 """
 import glob
 import os
@@ -38,7 +38,7 @@ def ship_path(label):
     from progress import shipped_lib_dir
     d = shipped_lib_dir()
     if d is None:
-        sys.exit("libfndiff.py: set NOLF_SOURCE to the NOLF Source Code v1.003 "
+        sys.exit("libfndiff.py: set NOLF2_SOURCE to the NOLF Source Code v1.003 "
                  "release (see progress/README.md)")
     return os.path.join(d, label + ".lib")
 
