@@ -8,7 +8,8 @@ source and, recursively, of every header it names, resolved like MSVC --
 
   "name"  the including file's directory, then the source file's, then the
           /I directories (relative to the compile's working directory), then
-          the project headers on INCLUDE (src/nolf2src/)
+          the project headers on INCLUDE (src/nolf2src/, or the directory
+          MKDEPS_PROJECT_INCLUDE names)
   <name>  the /I directories, then the project headers on INCLUDE
 
 -- case-insensitively, as on Windows, with `\\` as a separator. The
@@ -49,6 +50,8 @@ RESFILE = re.compile(rb'^[ \t]*\w+[ \t]+\w+(?:[ \t]+(?:DISCARDABLE|PRELOAD|LOADO
                      rb'|FIXED|PURE|IMPURE|SHARED|NONSHARED))*[ \t]+"([^"\r\n]+)"[ \t]*(?://[^\r\n]*)?\r?$',
                      re.M | re.I)
 CACHE_VERSION = 2
+# the project's own headers, last on every INCLUDE path (build/build.mk)
+PROJECT_INCLUDE = os.environ.get("MKDEPS_PROJECT_INCLUDE", "src/nolf2src")
 
 
 class Resolver:
@@ -148,7 +151,7 @@ def main():
                     dl.append(w[2:])
             dl = [r.find(cwd, d, isdir=True) for d in dl]
             isrc = real.lower().endswith(".rc")
-            hs = r.deps(real, [d for d in dl if d] + ["src/nolf2src"], rc=os.path.normpath(cwd) if isrc else None)
+            hs = r.deps(real, [d for d in dl if d] + [PROJECT_INCLUDE], rc=os.path.normpath(cwd) if isrc else None)
             if isrc:
                 # every file in the script's directory and in each /i one
                 hs = sorted(set(hs).union(

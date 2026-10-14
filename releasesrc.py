@@ -27,7 +27,8 @@ build's input.
   tools/releasesrc.py diff [rev]                   release-visible changes to src/ since
                                                    <rev> (default HEAD), as a unified diff
 
-Only NOLF2SRC_MODERN and NOLF2SRC_DEBUG are resolved, and only in the
+Only NOLF2SRC_MODERN and NOLF2SRC_DEBUG (or the macros RELEASESRC_VARIANTS
+names) are resolved, and only in the
 `#ifdef`/`#ifndef` forms; any other test of them (#if, #elif, defined())
 is an error, so the release build cannot silently compile the wrong side.
 """
@@ -38,7 +39,9 @@ import shutil
 import subprocess
 import sys
 
-VARIANT = ("NOLF2SRC_MODERN", "NOLF2SRC_DEBUG")
+# The variant macros: NOLF2's, unless the project names its own in
+# RELEASESRC_VARIANTS (space-separated; build/env.sh exports it).
+VARIANT = tuple(os.environ.get("RELEASESRC_VARIANTS", "NOLF2SRC_MODERN NOLF2SRC_DEBUG").split())
 STRIP_EXT = (".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".inl",
              ".rc", ".rc2", ".asm", ".def", ".idl")
 # build outputs: never mirrored as sources, synced by `outputs` -- anything
