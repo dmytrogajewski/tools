@@ -57,8 +57,12 @@ add)
     # tools/, where it is a submodule (cjacksrc): a checkout of its own, at
     # the commit the branch records, since the tools are edited in a tree
     # like any source (hard links would edit the main checkout's)
-    if [ -f "$REPO/tools/.git" ] && [ ! -f "$dir/tools/tools.py" ] && [ ! -f "$dir/tools/progress.py" ]; then
-        git -C "$dir" submodule update --init tools >/dev/null
+    # (cloned from the main checkout's, which has commits not yet pushed;
+    # the coordinator fetches the tree's tools commits back from it)
+    if [ -f "$REPO/tools/.git" ] && [ ! -e "$dir/tools/.git" ]; then
+        rmdir "$dir/tools" 2>/dev/null || true
+        git clone -q "$REPO/tools" "$dir/tools"
+        git -C "$dir/tools" checkout -q "$(git -C "$dir" ls-tree HEAD tools | awk '{print $3}')"
     fi
     # the submodules' contents and the reference images, hard-linked
     for d in toolchains rez out/reference ext/ffmpeg; do
