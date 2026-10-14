@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create (or remove) an isolated git worktree that can BUILD and VERIFY, for
 # working on several things at once -- typically one agent per package of
-# docs/engine/PLAN.md, each in its own tree, so that one's half-finished edit
+# the project's PLAN.md, each in its own tree, so that one's half-finished edit
 # never changes what another measures.
 #
 # A plain `git worktree add` is not enough, because what the build needs is
@@ -53,6 +53,12 @@ add)
         else
             git -C "$REPO" worktree add -q -b "$name" "$dir" "${3:-HEAD}"
         fi
+    fi
+    # tools/, where it is a submodule (cjacksrc): a checkout of its own, at
+    # the commit the branch records, since the tools are edited in a tree
+    # like any source (hard links would edit the main checkout's)
+    if [ -f "$REPO/tools/.git" ] && [ ! -f "$dir/tools/tools.py" ] && [ ! -f "$dir/tools/progress.py" ]; then
+        git -C "$dir" submodule update --init tools >/dev/null
     fi
     # the submodules' contents and the reference images, hard-linked
     for d in toolchains rez out/reference ext/ffmpeg; do
