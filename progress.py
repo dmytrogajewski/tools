@@ -38,7 +38,11 @@ installed retail game into out/reference/ (`tools/retailextract.py
 reference`), and so do the
 Game of the Year game DLLs (CShell.dll, Object.lto, CRes.dll, out of
 NOLFGOTY.REZ); CRes.dll holds no code of Monolith's, so it is scored
-resource by resource instead (rows_for_resources); the lithshared
+resource by resource instead (rows_for_resources), and so are the engine
+images' resources, as targets of their own (ENGINE_RES: "lithtech.exe:rsrc",
+...; ltmsg.dll, resources around an empty DllMain, and sres.dll, which has
+none, only this way); neither
+is in the total, which counts code. The lithshared
 libraries (and RegMgr's Debug build) are compared per COFF symbol against Monolith's prebuilt
 .libs from the NOLF Source Code v1.003 release, found through $NOLF_SOURCE
 and checked against progress/shipped-libs.sha256. Without NOLF_SOURCE the
@@ -189,6 +193,22 @@ GAME = [
 # CRT's DLL entry code -- so its resources are what is scored.
 GAME_RES = ("CRes.dll", REFERENCE + "/CRes.dll", "src/game/ClientRes/Release/CRes.dll")
 GAME_LABELS = {g[0] for g in GAME} | {GAME_RES[0]}
+# The engine images' resources (version blocks, dialogs, string tables,
+# icons; ltmsg.dll's engine messages), scored the same way, resource by
+# resource, each as a target of its own ("<image>:rsrc") beside the image's
+# code, and like CRes.dll left out of the total: (label, shipped, ours).
+ENGINE_RES = [
+    ("lithtech.exe:rsrc", REFERENCE + "/lithtech.exe", "src/engine/lithtech/Release/lithtech.exe"),
+    ("server.dll:rsrc",   REFERENCE + "/server.dll",   "src/engine/server/Release/server.dll"),
+    ("d3d.ren:rsrc",      REFERENCE + "/d3d.ren",      "src/engine/d3d/Release/d3d.ren"),
+    ("NOLF.exe:rsrc",     REFERENCE + "/NOLF.exe",     "src/engine/launcher/Release/NOLF.exe"),
+    ("NolfServ.exe:rsrc", REFERENCE + "/NolfServ.exe", "src/engine/nolfserv/Release/NolfServ.exe"),
+    ("ltmsg.dll:rsrc",    REFERENCE + "/ltmsg.dll",    "src/engine/ltmsg/Release/ltmsg.dll"),
+    # the server's resource DLL (out of NOLF2.REZ): it has none, so its one
+    # row says that ours has none either
+    ("sres.dll:rsrc",     REFERENCE + "/sres.dll",     "src/engine/sres/Release/sres.dll"),
+]
+RES_LABELS = [GAME_RES[0]] + [r[0] for r in ENGINE_RES]
 
 # Monolith's own code within each image. Everything above these ranges is the
 # statically linked CRT (and MFC in NOLF.exe's and NolfServ.exe's case) — real
@@ -1488,6 +1508,8 @@ def _resources(path):
     nsec = struct.unpack_from("<H", d, pe + 6)[0]
     optsz = struct.unpack_from("<H", d, pe + 20)[0]
     rva = struct.unpack_from("<I", d, pe + 24 + 96 + 2 * 8)[0]
+    if not rva:
+        return {}           # no resource section at all
     secs = []
     for i in range(nsec):
         s = pe + 24 + optsz + i * 40
@@ -1532,6 +1554,11 @@ def rows_for_resources(label, shipped, ours):
     theirs = _resources(shipped)
     mine = _resources(ours) if os.path.exists(ours) else {}
     rows = []
+    if not theirs:
+        # an image with no resources at all: one empty row, identical while
+        # ours has none either
+        return [(label, "rsrc:(none)", 0,
+                 "identical" if os.path.exists(ours) and not mine else "near")]
     for key in sorted(theirs, key=str):
         data = theirs[key]
         if key not in mine:
@@ -1711,7 +1738,7 @@ def main():
     # A missing reference image would silently drop its target from the
     # totals; refuse instead.
     missing = [n for n in ("NOLF.exe", "NolfServ.exe", "lithtech.exe", "server.dll", "d3d.ren",
-                           "CShell.dll", "Object.lto", "CRes.dll")
+                           "ltmsg.dll", "sres.dll", "CShell.dll", "Object.lto", "CRes.dll")
                if not os.path.exists(os.path.join(REFERENCE, n))]
     if missing:
         sys.exit("progress.py: %s missing from %s/ -- run `make progress`, or "
@@ -1805,6 +1832,8 @@ def main():
     # scored, but not "started": resource data is not code, so it stays out
     # of the total (and the README lists it below it)
     all_rows += rows_for_resources(*GAME_RES)
+    for res in ENGINE_RES:
+        all_rows += rows_for_resources(*res)
 
     # --todo[=<target>] (or --attempted, --near, --small): the rows of one
     # status. The table gives a number and the number alone is not a
@@ -1920,10 +1949,12 @@ def main():
               f"{t['funcs']:>6} {t['unwritten']:>5} {t['unplaced']:>5} "
               f"{t['bytes_identical']:>10} "
               f"{t['bytes_total']:>10}  {pct:>4.1f}%")
-    r = targets.get(GAME_RES[0])
-    if r:
+    for label in RES_LABELS:
+        r = targets.get(label)
+        if not r:
+            continue
         pct = 100 * r["bytes_identical"] / max(r["bytes_total"], 1)
-        print(f"{GAME_RES[0]:<18} {r['identical']:>6} {r['near']:>5} "
+        print(f"{label:<18} {r['identical']:>6} {r['near']:>5} "
               f"{r['small']:>6} {r.get('attempted', 0):>6} {r['todo']:>5} "
               f"{r['funcs']:>6} {r['unwritten']:>5} {r['unplaced']:>5} "
               f"{r['bytes_identical']:>10} {r['bytes_total']:>10}  {pct:>4.1f}%"

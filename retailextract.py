@@ -13,6 +13,10 @@
                                                       icons and wizard art, out
                                                       of the retail
                                                       NolfServ.exe's resources
+  retailextract.py lithtechres <retaildir> <resdir>   the engine's icon and
+                                                      console font, out of
+                                                      the retail
+                                                      lithtech.exe's resources
   retailextract.py goty        <retaildir> <outdir>   the Game of the Year text
                                                       our CRes.dll is built
                                                       with, out of the retail
@@ -71,6 +75,12 @@ src/engine/nolfserv/res/. (Its other binary resources, a cursor and four
 bitmaps, are MFC's own, which nolfserv.rc takes from the toolchain's
 afxres.rc as the original did.)
 
+`lithtechres` does the same for the engine, lithtech.exe: its icon and the
+console's font (a PCX image of the character cells, resource type 12345,
+which clientconsole.cpp loads) that lithtech.rc includes from
+src/engine/lithtech/res/. (Its other binary resources, a cursor and four
+bitmaps, are MFC's, which lithtech.rc takes from the toolchain's afxres.rc.)
+
 `goty` writes the two things the retail Game of the Year CRES.dll (in
 NOLFGOTY.REZ) has and Monolith's v1.003 source of it does not: the
 string tables of the Game of the Year content (string IDs 30000-30095: the
@@ -81,8 +91,8 @@ resources are the retail ones. The retail DLL is read in memory, never
 written anywhere or run; the text stays out of this repository.
 
 `reference` copies the retail lithtech.exe, server.dll, d3d.ren, NOLF.exe,
-NolfServ.exe and ltmsg.dll, and the Game of the Year CShell.dll, Object.lto and CRes.dll out of
-NOLFGOTY.REZ, to a reference directory (build/reference.sh: out/reference/). They
+NolfServ.exe and ltmsg.dll, the Game of the Year CShell.dll, Object.lto and CRes.dll out of
+NOLFGOTY.REZ, and sres.dll out of NOLF2.REZ, to a reference directory (build/reference.sh: out/reference/). They
 are what tools/progress.py, `build/engine.sh ... verify` and the
 reconstruction tools compare our objects against; the build never reads
 them, and nothing in that directory is ever run or goes into a game
@@ -132,6 +142,10 @@ REFERENCE = ["lithtech.exe", "server.dll", "d3d.ren", "NOLF.exe", "NolfServ.exe"
 # Object.lto has 89% of its bytes identical to GOTY's and 55% to 1.003's.
 REFERENCE_GAME = [("CSHELL.dll", "CShell.dll"), ("OBJECT.lto", "Object.lto"),
                   ("CRES.dll", "CRes.dll")]
+# ... and the server's resource DLL, which only the original release's
+# NOLF2.REZ holds (neither nolfu003.rez nor NOLFGOTY.REZ replaces it, so it
+# is the one the GOTY install runs): (archive, entry, reference name).
+REFERENCE_REZ = [("NOLF2.REZ", "SRES.dll", "sres.dll")]
 
 # Configs the build writes itself rather than copying (see build/all.sh).
 NOT_COPIED = {"autoexec.cfg"}
@@ -448,6 +462,18 @@ def cursor_file(res, group):
     return head + body
 
 
+def write_res(resdir, out, origin):
+    """Write {file name: bytes} into resdir, leaving files already right
+    untouched (so make sees no change)."""
+    resdir = Path(resdir)
+    resdir.mkdir(parents=True, exist_ok=True)
+    for name, data in out.items():
+        dest = resdir / name
+        if not dest.exists() or dest.read_bytes() != data:
+            dest.write_bytes(data)
+    print(f"== {origin} resources -> {resdir}/ ({', '.join(out)})")
+
+
 def cmd_launcherres(retaildir, resdir):
     r = Retail(retaildir)
     p = r.find("NOLF.exe")
@@ -460,13 +486,7 @@ def cmd_launcherres(retaildir, resdir):
         "webhand.cur": cursor_file(res, "WEBHAND"),
         "webclick.cur": cursor_file(res, "WEBCLICK"),
     }
-    resdir = Path(resdir)
-    resdir.mkdir(parents=True, exist_ok=True)
-    for name, data in out.items():
-        dest = resdir / name
-        if not dest.exists() or dest.read_bytes() != data:
-            dest.write_bytes(data)
-    print(f"== {r.name}:{p} resources -> {resdir}/ ({', '.join(out)})")
+    write_res(resdir, out, f"{r.name}:{p}")
 
 
 def cmd_nolfservres(retaildir, resdir):
@@ -478,13 +498,18 @@ def cmd_nolfservres(retaildir, resdir):
         "selected.ico": icon_file(res, 133),      # IDI_SELECTED
         "wizard.bmp": bmp_file(res[(RT_BITMAP, 139)]),   # IDB_WIZARD
     }
-    resdir = Path(resdir)
-    resdir.mkdir(parents=True, exist_ok=True)
-    for name, data in out.items():
-        dest = resdir / name
-        if not dest.exists() or dest.read_bytes() != data:
-            dest.write_bytes(data)
-    print(f"== {r.name}:{p} resources -> {resdir}/ ({', '.join(out)})")
+    write_res(resdir, out, f"{r.name}:{p}")
+
+
+def cmd_lithtechres(retaildir, resdir):
+    r = Retail(retaildir)
+    p = r.find("lithtech.exe")
+    res = pe_resources(r.read(p))
+    out = {
+        "lithtech.ico": icon_file(res, 128),      # IDR_MAINFRAME
+        "confont.pcx": res[(12345, 140)],         # the console font
+    }
+    write_res(resdir, out, f"{r.name}:{p}")
 
 
 # The GOTY string blocks: string IDs 30000-30095 are blocks 1876-1881 (a block
@@ -569,17 +594,19 @@ def cmd_reference(retaildir, refdir):
         dest = refdir / name
         r.copy(p, dest)
         print(f"== {r.name}:{p} -> {dest}")
-    p = r.find("NOLFGOTY.REZ")
-    rez = Rez(str(r.root / p))
-    found = {path.lower(): (pos, size) for path, pos, size in rez.walk()}
-    for name, out in REFERENCE_GAME:
-        if name.lower() not in found:
-            sys.exit(f"retailextract: no {name} in {r.name}:{p}")
-        pos, size = found[name.lower()]
-        rez.f.seek(pos)
-        (refdir / out).write_bytes(rez.f.read(size))
-        print(f"== {r.name}:{p}:{name} -> {refdir / out}")
-    rez.f.close()
+    wanted = [("NOLFGOTY.REZ", name, out) for name, out in REFERENCE_GAME] + REFERENCE_REZ
+    for archive in dict.fromkeys(a for a, _n, _o in wanted):
+        p = r.find(archive)
+        rez = Rez(str(r.root / p))
+        found = {path.lower(): (pos, size) for path, pos, size in rez.walk()}
+        for _a, name, out in (w for w in wanted if w[0] == archive):
+            if name.lower() not in found:
+                sys.exit(f"retailextract: no {name} in {r.name}:{p}")
+            pos, size = found[name.lower()]
+            rez.f.seek(pos)
+            (refdir / out).write_bytes(rez.f.read(size))
+            print(f"== {r.name}:{p}:{name} -> {refdir / out}")
+        rez.f.close()
 
 
 def cmd_audit(gamedir):
@@ -630,6 +657,8 @@ def main():
         cmd_launcherres(sys.argv[2], sys.argv[3])
     elif cmd == "nolfservres" and len(sys.argv) == 4:
         cmd_nolfservres(sys.argv[2], sys.argv[3])
+    elif cmd == "lithtechres" and len(sys.argv) == 4:
+        cmd_lithtechres(sys.argv[2], sys.argv[3])
     elif cmd == "goty" and len(sys.argv) == 4:
         cmd_goty(sys.argv[2], sys.argv[3])
     elif cmd == "reference" and len(sys.argv) == 4:

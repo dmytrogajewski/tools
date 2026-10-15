@@ -58,11 +58,16 @@ ROWS = [
     ("`CShell.dll`", "the game: client", ["CShell.dll"]),
     ("`Object.lto`", "the game: server objects", ["Object.lto"]),
 ]
-# Rows listed after ROWS but left out of the total: a resource-only image,
-# scored resource by resource (tools/progress.py, rows_for_resources). Its
+# Rows listed after ROWS but left out of the total: resources, scored
+# resource by resource (tools/progress.py, rows_for_resources) -- CRes.dll, a
+# resource-only image, and the engine images' resources (ENGINE_RES). Their
 # data is not code, so it is not added to the total.
 RES_ROWS = [
     ("`CRes.dll`", "the game's resources", ["CRes.dll"]),
+    ("engine resources", "the resources of `lithtech.exe`, `server.dll`, `d3d.ren`, `NOLF.exe`, "
+     "`NolfServ.exe`, `ltmsg.dll`, `sres.dll`",
+     ["lithtech.exe:rsrc", "server.dll:rsrc", "d3d.ren:rsrc", "NOLF.exe:rsrc",
+      "NolfServ.exe:rsrc", "ltmsg.dll:rsrc", "sres.dll:rsrc"]),
 ]
 
 
@@ -125,7 +130,9 @@ def render(summary):
             f"{pct_floor(agg['bytes_identical'], agg['bytes_total'])}% | "
             f"{agg['unwritten']:,} | {agg['unplaced']:,} |")
     for label, what, names in RES_ROWS:
-        agg = {k: sum(t[n].get(k, 0) for n in names) for k in tot}
+        if not any(n in t for n in names):
+            continue        # not in this summary (recorded before it was scored)
+        agg = {k: sum(t.get(n, {}).get(k, 0) for n in names) for k in tot}
         out.append(
             f"| {label} | {what}, not in the total | {agg['identical']:,} / "
             f"{agg['funcs']:,} resources | "
