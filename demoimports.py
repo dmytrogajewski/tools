@@ -1,46 +1,63 @@
 #!/usr/bin/env python3
-"""The 1.3 multiplayer demo's engine as a key to retail Lithtech.exe's SecuROM.
+"""An unprotected demo engine as a key to retail Lithtech.exe's SecuROM.
 
-Retail `Lithtech.exe` is SecuROM-wrapped (docs/engine/anatomy.md, section
-2): every `call dword ptr [IAT]` (ff 15) in `.text` was rewritten to call
-one dispatcher slot in `.cms_d` (0x607ec0), so which import each of those
-1,514 sites calls cannot be read from retail; and `.text` 0x565000..0x56a000
-(five pages) is encrypted. The multiplayer demo (`nolf2_mpdemo_en.exe`,
-built 20 days after 1.3, Rich header identical) has an unprotected engine
-whose IAT sits at the same addresses as retail's original one, and the
-plaintext of those pages.
+Retail `Lithtech.exe` is SecuROM-wrapped: its `call dword ptr [IAT]` (ff 15)
+sites in `.text` were rewritten to call SecuROM's own slots, so which
+import each of them calls cannot be read from retail; and a few pages of
+`.text` are encrypted on disc. A demo released about the same time has an
+unprotected engine whose IAT and original import directory sit where
+retail's original ones do, and the plaintext of those pages. Which game's
+retail engine and demo are used is a profile (PROFILES), picked by the
+sha256 of out/reference/Lithtech.exe, or by --game=<name>:
 
-  demoimports.py extract   unpack the demo's Lithtech.exe and server.dll
-                           into out/mpdemo/ from rez/'s artifact
-                           (rez/assemble-artifacts.sh demos first), with
-                           rez/tools/sfxcab.py and rez/tools/unshield
-  demoimports.py map [--csv=progress/engine/Lithtech-iat-calls.csv]
+  nolf2   NOLF2 1.3 and its multiplayer demo (`nolf2_mpdemo_en.exe`, built
+          20 days after 1.3, Rich header identical): one dispatcher slot in
+          `.cms_d` (0x607ec0) for all 1,514 sites; `.text`
+          0x565000..0x56a000 encrypted (nolf2src's docs/engine/anatomy.md,
+          section 2). The default.
+  cjack   Contract J.A.C.K. 1.1 (2003-10-27) and its single-player demo
+          (`contractjack_demo_sp.exe`, engine of 2003-10-10: the same
+          compiler and flags, Rich header identical, `.rdata` and `.data`
+          of the same sizes at the same addresses; the multiplayer demo's
+          engine is a /GS build and less alike): 1,088 sites redirected to
+          35 slots in `.obfzv` (0x638000..0x709000); `.text`
+          0x536000..0x53b000 encrypted.
+
+  demoimports.py extract   unpack the demo's engine into out/<demo>/
+                           (nolf2: from rez/'s artifact, rez/assemble-
+                           artifacts.sh demos first; cjack: from
+                           rez/demos/), with rez/tools/sfxcab.py and
+                           rez/tools/unshield
+  demoimports.py map [--csv=<csv>]
                            pair every redirected retail call site with the
                            demo's instruction and name the import it calls;
                            checks the demo's import table against retail's
-                           original one (.rdata) slot by slot
-  demoimports.py plain [--out=out/mpdemo/Lithtech-readable.exe]
+                           original one (.rdata) slot by slot. Writes the
+                           profile's CSV (progress/engine/Lithtech-iat-
+                           calls.csv)
+  demoimports.py plain [--out=out/<demo>/Lithtech-readable.exe]
                            a copy of retail with the encrypted pages filled
                            in from the demo and every redirected call put
                            back on its IAT slot -- for reading with
                            tools/exedump.py / objdump only, never committed
                            (out/ is ignored) and never run
 
-`plain` places the demo's bytes in three pieces (retail = demo + 0x40 for
-0x565000..0x565250, + 0x30 to 0x5675e0, the end of the UI library; - 0x10
-from 0x5675e0, msvcrt.lib's static code, the import thunks and D3DX), found
-from retail's own calls into the pages; re-aims the branches that leave a
-piece; and puts the IAT operands right. What it does not fix: absolute
-addresses of data inside the filled bytes are the demo's (its .data and
-vtables are laid out a little differently), and the initializer cut by
-0x565000 has the demo's tail. Read it as the demo's code at retail's
-addresses.
+`plain` places the demo's bytes in pieces, each at its own shift (for
+NOLF2: retail = demo + 0x40 for 0x565000..0x565250, + 0x30 to 0x5675e0,
+the end of the UI library; - 0x10 from 0x5675e0, msvcrt.lib's static code,
+the import thunks and D3DX), found from retail's own calls into the pages;
+re-aims the branches that leave a piece; and puts the IAT operands right.
+What it does not fix: absolute addresses of data inside the filled bytes
+are the demo's (its .data and vtables are laid out a little differently),
+and code cut by a page edge has the demo's tail. Read it as the demo's code
+at retail's addresses.
 
 What is committed is the map (addresses and import names), not the demo's
-code. Ten MSVCRT slots of the IAT hold different imports in the two images
-(the same 230 imports, ordered differently), so the import is the demo's
-and the slot is where retail's original import table has that name. server.dll is not protected (retail and demo both call their IAT
-directly), so there is nothing to map for it.
+code. Where an import sits at different IAT slots in the two images (ten
+MSVCRT slots in NOLF2's), the import is the demo's and the slot is where
+retail's original import table has that name. server.dll is not protected
+in either game (retail calls its IAT directly), so there is nothing to map
+for it.
 
 How a site is paired. The demo's and retail's code are the same up to
 object placement (retail = demo + a constant over long runs; other
@@ -68,20 +85,67 @@ import tarfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RETAIL = os.path.join(ROOT, "out/reference/Lithtech.exe")
-ARTIFACT = os.path.join(ROOT, "rez/artifacts/demos/nolf2_mpdemo_en.exe.tar.xz")
-OUTDIR = os.path.join(ROOT, "out/mpdemo")
-DEMO = os.path.join(OUTDIR, "Lithtech.exe")
-CSV = os.path.join(ROOT, "progress/engine/Lithtech-iat-calls.csv")
 
-# the demo's unprotected engine, as rez's artifact unpacks it
-DEMO_SHA256 = {
-    "Lithtech.exe": "5cdd539d4b625ea04a95f9754f7bc29549a3dc6740eccd14aaa365ba1b80d7b1",
-    "server.dll": "2cb74ee9766b6649f0095d7a496a00bc66938aab42a601d16eedee4429956987",
+# Per game: the retail engine (its sha256), the demo, SecuROM's redirect
+# slots (lo, hi), the encrypted pages, retail's original import directory.
+PROFILES = {
+    "nolf2": dict(
+        retail_sha256="4e83a4be52e10586d93077ef746874a751a25ad4d079d79347d92fce02e172e9",
+        artifact="rez/artifacts/demos/nolf2_mpdemo_en.exe.tar.xz",
+        member="nolf2_mpdemo_en.exe",
+        unshield=["-o", "-g", "Resources"], cab="data1.cab", group="Resources",
+        outdir="out/mpdemo",
+        demo_sha256={
+            "Lithtech.exe": "5cdd539d4b625ea04a95f9754f7bc29549a3dc6740eccd14aaa365ba1b80d7b1",
+            "server.dll": "2cb74ee9766b6649f0095d7a496a00bc66938aab42a601d16eedee4429956987",
+        },
+        slots=(0x607EC0, 0x607EC4),     # SecuROM's dispatcher slot in .cms_d
+        enc=(0x565000, 0x56A000),
+        orig_impdir=0x590CF0,
+        csv="progress/engine/Lithtech-iat-calls.csv"),
+    "cjack": dict(
+        retail_sha256="7b8a9540e213bf114e098ffce0b9ca08b633343b320f640dc195478ebea533bd",
+        setup="rez/demos/contractjack_demo_sp.exe",
+        unshield=["-o", "-g", "Program Files"], cab="data1.hdr", group="Program_Files",
+        outdir="out/spdemo",
+        demo_sha256={
+            "Lithtech.exe": "d69589b3493af668a2fa4eb360452ad454587868f5fb01a6ee6ecc8b02e044f0",
+        },
+        slots=(0x638000, 0x709000),     # SecuROM's slots: all of .obfzv
+        enc=(0x536000, 0x53B000),
+        orig_impdir=0x566058,
+        csv="progress/engine/Lithtech-iat-calls.csv"),
 }
 
-SLOT = 0x607EC0                       # SecuROM's dispatcher slot in .cms_d
-ENC = (0x565000, 0x56A000)            # retail's encrypted .text pages
-ORIG_IMPDIR = 0x590CF0                # retail's original import directory
+
+def pick_profile(args):
+    for a in args:
+        if a.startswith("--game="):
+            name = a[7:]
+            if name not in PROFILES:
+                sys.exit("demoimports: no profile %r (%s)" % (name, ", ".join(PROFILES)))
+            return name
+    if os.path.exists(RETAIL):
+        h = sha(RETAIL)
+        for name, p in PROFILES.items():
+            if p["retail_sha256"] == h:
+                return name
+    return "nolf2"
+
+
+def use_profile(name):
+    """Set the module's constants from a profile."""
+    global GAME, P, OUTDIR, DEMO, CSV, SLOTS, ENC, ORIG_IMPDIR, DEMO_SHA256
+    GAME, P = name, PROFILES[name]
+    OUTDIR = os.path.join(ROOT, P["outdir"])
+    DEMO = os.path.join(OUTDIR, "Lithtech.exe")
+    CSV = os.path.join(ROOT, P["csv"])
+    SLOTS, ENC, ORIG_IMPDIR = P["slots"], P["enc"], P["orig_impdir"]
+    DEMO_SHA256 = P["demo_sha256"]
+
+
+def is_slot(v):
+    return SLOTS[0] <= v < SLOTS[1]
 
 
 class PE:
@@ -151,41 +215,47 @@ def need_demo():
     if not os.path.exists(DEMO):
         sys.exit("demoimports: %s is missing -- run `tools/demoimports.py extract`" % os.path.relpath(DEMO, ROOT))
     if sha(DEMO) != DEMO_SHA256["Lithtech.exe"]:
-        sys.exit("demoimports: %s is not the 1.3 MP demo's engine" % DEMO)
+        sys.exit("demoimports: %s is not the %s demo's engine" % (DEMO, GAME))
     return PE(DEMO)
 
 
 # ---------------------------------------------------------------- extract
 
 def cmd_extract(args):
-    if not os.path.exists(ARTIFACT):
-        sys.exit("demoimports: %s is missing -- run `rez/assemble-artifacts.sh demos`"
-                 % os.path.relpath(ARTIFACT, ROOT))
     unshield = os.path.join(ROOT, "rez/tools/unshield/unshield")
     if not os.access(unshield, os.X_OK):
         sys.exit("demoimports: rez/tools/unshield/unshield is not built -- `make -C rez/tools/unshield`")
     work = os.path.join(OUTDIR, "work")
     os.makedirs(work, exist_ok=True)
-    exe = os.path.join(work, "nolf2_mpdemo_en.exe")
-    if not os.path.exists(exe):
-        with tarfile.open(ARTIFACT) as t:
-            m = t.getmember("nolf2_mpdemo_en.exe")
-            with t.extractfile(m) as f, open(exe, "wb") as g:
-                shutil.copyfileobj(f, g)
+    if "setup" in P:
+        exe = os.path.join(ROOT, P["setup"])
+        if not os.path.exists(exe):
+            sys.exit("demoimports: %s is missing (rez/)" % P["setup"])
+    else:
+        artifact = os.path.join(ROOT, P["artifact"])
+        if not os.path.exists(artifact):
+            sys.exit("demoimports: %s is missing -- run `rez/assemble-artifacts.sh demos`" % P["artifact"])
+        exe = os.path.join(work, P["member"])
+        if not os.path.exists(exe):
+            with tarfile.open(artifact) as t:
+                m = t.getmember(P["member"])
+                with t.extractfile(m) as f, open(exe, "wb") as g:
+                    shutil.copyfileobj(f, g)
     disk = os.path.join(work, "sfx")
     if not os.path.exists(os.path.join(disk, "Disk1", "data1.hdr")):
         subprocess.run([sys.executable, "-I", os.path.join(ROOT, "rez/tools/sfxcab.py"), exe, disk], check=True,
                        stdout=subprocess.DEVNULL)
     xdir = os.path.join(work, "x")
-    subprocess.run([unshield, "-o", "-g", "Resources", "-d", xdir, "x",
-                    os.path.join(disk, "Disk1", "data1.cab")], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([unshield] + P["unshield"] + ["-d", xdir, "x", os.path.join(disk, "Disk1", P["cab"])],
+                   check=True, stdout=subprocess.DEVNULL)
     for name, want in DEMO_SHA256.items():
-        src = os.path.join(xdir, "Resources", name)
+        src = os.path.join(xdir, P["group"], name)
         got = sha(src)
         if got != want:
             sys.exit("demoimports: %s has sha256 %s, expected %s" % (name, got, want))
         shutil.copyfile(src, os.path.join(OUTDIR, name))
-        print("out/mpdemo/%s" % name)
+        print(os.path.relpath(os.path.join(OUTDIR, name), ROOT))
+    shutil.rmtree(work)                 # the unpacked demo: hundreds of MB
 
 
 # ---------------------------------------------------------------- map
@@ -277,7 +347,7 @@ def score(a, b):
 def build_map(ret, demo):
     dimp = demo.imports()
     lo, hi = min(dimp), max(dimp) + 4
-    R = [va for va, _ in sites(ret, lambda v: v == SLOT)]
+    R = [va for va, _ in sites(ret, is_slot)]
     D = sites(demo, lambda v: lo <= v < hi)
     dslot = dict(D)
     rctx = contexts(disasm(ret), R)
@@ -397,8 +467,8 @@ def cmd_map(args):
     print("wrote", os.path.relpath(os.path.abspath(out), ROOT))
 
 
-def load_map(path=CSV):
-    with open(path) as f:
+def load_map(path=None):
+    with open(path or CSV) as f:
         return {int(r["retail_site"], 16): int(r["iat_slot"], 16) for r in csv.DictReader(f) if r["iat_slot"]}
 
 
@@ -610,7 +680,10 @@ def cmd_plain(args):
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("extract", "map", "plain"):
         sys.exit(__doc__)
-    {"extract": cmd_extract, "map": cmd_map, "plain": cmd_plain}[sys.argv[1]](sys.argv[2:])
+    args = sys.argv[2:]
+    use_profile(pick_profile(args))
+    args = [a for a in args if not a.startswith("--game=")]
+    {"extract": cmd_extract, "map": cmd_map, "plain": cmd_plain}[sys.argv[1]](args)
 
 
 if __name__ == "__main__":
