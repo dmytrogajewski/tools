@@ -35,6 +35,7 @@ the kinds are very unequal:
     and frame layout, not structure.
 """
 import collections
+import os
 import re
 import subprocess
 import sys
@@ -62,7 +63,15 @@ def main():
     image, start, end, obj, sym = sys.argv[1:]
     a = hist(["objdump", "-d", f"--start-address={start}",
               f"--stop-address={end}", image])
-    b = hist(["objdump", "-d", obj], sym)
+    # Our side through dumpfn.py, not `objdump -d <obj>`: objdump prints a
+    # label for every symbol whose VALUE falls in the section, so a static
+    # of another section (big1ef30.obj's `_sub_1001e8d0$` at offset 4)
+    # appears four instructions into sub_1001ef30 and switched the count
+    # off there -- "ours 3 instructions, residue 1707". dumpfn slices the
+    # function by its own symbol and takes one symbol per offset (icl's
+    # `$$1` alias doubled every count before that).
+    here = os.path.dirname(os.path.abspath(__file__))
+    b = hist(["python3", os.path.join(here, "dumpfn.py"), obj, sym])  # already sliced: count all
     if not b:
         sys.exit(f"no symbol matching {sym!r} in {obj}")
 
