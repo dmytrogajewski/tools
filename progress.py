@@ -614,6 +614,28 @@ def _load_objs(objs, icl=False):
     return funcs, unpadded, from_lib
 
 
+def _restore_iat_calls(tgt, text, tva):
+    """The import calls a copy protection rewrote, put back where the
+    target lists them (`iat_calls`, tools/demoimports.py's map: retail
+    site, IAT slot): `ff 15 <slot>` in place of the six bytes SecuROM left
+    there (a call to its slot, or a direct call to a dispatcher and a junk
+    byte), so our objects' import calls match whichever form the site has.
+    The slot is a relocation in our objects, masked either way."""
+    path = tgt.get("iat_calls")
+    if not path:
+        return text
+    t = bytearray(text)
+    with open(os.path.join(REPO, path)) as f:
+        for r in csv.DictReader(f):
+            if not r["iat_slot"]:
+                continue
+            o = int(r["retail_site"], 16) - tva
+            if 0 <= o <= len(t) - 6:
+                t[o:o + 2] = b"\xff\x15"
+                struct.pack_into("<I", t, o + 2, int(r["iat_slot"], 16))
+    return bytes(t)
+
+
 def _rows_for_image(tgt, objs, mapfile, linked_path):
     """A PE image under reconstruction (exe or dll, no symbols).
 
@@ -627,7 +649,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     p = os.path.join(REPO, tgt["shipped"])
     pe = Pe(p)
     tva, tvs, trp = pe.secs[".text"]
-    text = pe.d[trp : trp + tvs]
+    text = _restore_iat_calls(tgt, pe.d[trp : trp + tvs], tva)
     img, starts, sizes = _enum_with_sizes(p, label)
 
     funcs, unpadded, from_lib = _load_objs(objs, icl)
