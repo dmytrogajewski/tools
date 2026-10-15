@@ -133,7 +133,7 @@ file is an easy mistake and it inverts the conclusion.
 
 | binary | cl builds present | its own C++ objects |
 |---|---|---|
-| `ltmsg.dll` | 8168 | 8168 ×2; it is resources around an empty `DllMain`, so its code is almost all CRT |
+| `ltmsg.dll` | 8168 | 8168 ×2; it is resources and the CRT, whose own default `DllMain` it uses, so its code is all CRT |
 | `NOLF.exe` | 8168, 8569, 8797, 8799 | 8799 ×10 and 8797 ×10; the C rows (8797 ×138) are the CRT and 8569 ×42 is MFC |
 | `server.dll` | 7291, 7299, 8168, 8447 | 8447 ×95 |
 | `lithtech.exe` | 7291, 7299, 8168, 8447, 8799 | 8447 ×155 |

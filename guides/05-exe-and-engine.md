@@ -82,7 +82,7 @@ run it on a host that does.)
    bitmaps, icons. Reconstruct them as an `.rc` and verify with `rsrcdiff`
    (payload by payload, layout-independent) — see how `src/engine/launcher/`
    and `src/engine/ltmsg/` do it. `ltmsg.dll` is *only* resources: its `.text`
-   is the bare CRT around an empty `DllMain`.
+   is the bare CRT, with the CRT's own default `DllMain`.
 
 5. **Structural tells for exes.** `NOLF.exe` is a Win32 app over *static*
    MFC — the dialogs are raw `DLGPROC`s driven by `DialogBoxParamA`, not MFC

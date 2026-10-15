@@ -40,7 +40,7 @@ Game of the Year game DLLs (CShell.dll, Object.lto, CRes.dll, out of
 NOLFGOTY.REZ); CRes.dll holds no code of Monolith's, so it is scored
 resource by resource instead (rows_for_resources), and so are the engine
 images' resources, as targets of their own (ENGINE_RES: "lithtech.exe:rsrc",
-...; ltmsg.dll, resources around an empty DllMain, and sres.dll, which has
+...; ltmsg.dll, resources and the C runtime, and sres.dll, which has
 none, only this way); neither
 is in the total, which counts code. The lithshared
 libraries (and RegMgr's Debug build) are compared per COFF symbol against Monolith's prebuilt
