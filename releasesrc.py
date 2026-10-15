@@ -146,7 +146,7 @@ def stripped_bytes(path, data=None):
 # generated link inputs, flex's and bison's output, CRes.dll's top resource
 # script
 # the custom build steps' outputs, written beside their sources
-GENERATED = re.compile(r"^Game/ObjectDLL/ObjectShared/(AnimationLex\.o|AnimationParse\.o|AnimationLexSymbols\.h)$",
+GENERATED = re.compile(r"^Game/ObjectDLL/(?:ObjectShared/)?(AnimationLex\.o|AnimationParse\.o|AnimationLexSymbols\.h)$",
                        re.I)
 
 
