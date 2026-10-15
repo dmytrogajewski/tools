@@ -20,8 +20,11 @@ sha256 of out/reference/Lithtech.exe, or by --game=<name>:
           compiler and flags, Rich header identical, `.rdata` and `.data`
           of the same sizes at the same addresses; the multiplayer demo's
           engine is a /GS build and less alike): 1,088 sites redirected to
-          35 slots in `.obfzv` (0x638000..0x709000); `.text`
-          0x536000..0x53b000 encrypted.
+          35 slots in `.obfzv` (0x638000..0x709000), and 91 more rewritten
+          as a direct `call rel32` (e8) into one of three dispatchers in
+          `.rjes` (0x59c000..0x638000) followed by one junk byte, the six
+          bytes of the `ff 15` they replace; `.text` 0x536000..0x53b000
+          encrypted.
 
   demoimports.py extract   unpack the demo's engine into out/<demo>/
                            (nolf2: from rez/'s artifact, rez/assemble-
@@ -73,6 +76,7 @@ how many demo sites tie (identical template code); `shift_run` whether the
 shift equals a neighbour's.
 """
 import collections
+import copy
 import csv
 import hashlib
 import os
@@ -112,6 +116,7 @@ PROFILES = {
             "Lithtech.exe": "d69589b3493af668a2fa4eb360452ad454587868f5fb01a6ee6ecc8b02e044f0",
         },
         slots=(0x638000, 0x709000),     # SecuROM's slots: all of .obfzv
+        stubs=(0x59C000, 0x638000),     # e8 + junk byte into .rjes's dispatchers
         enc=(0x536000, 0x53B000),
         orig_impdir=0x566058,
         csv="progress/engine/Lithtech-iat-calls.csv"),
@@ -135,13 +140,14 @@ def pick_profile(args):
 
 def use_profile(name):
     """Set the module's constants from a profile."""
-    global GAME, P, OUTDIR, DEMO, CSV, SLOTS, ENC, ORIG_IMPDIR, DEMO_SHA256
+    global GAME, P, OUTDIR, DEMO, CSV, SLOTS, ENC, ORIG_IMPDIR, DEMO_SHA256, STUBS
     GAME, P = name, PROFILES[name]
     OUTDIR = os.path.join(ROOT, P["outdir"])
     DEMO = os.path.join(OUTDIR, "Lithtech.exe")
     CSV = os.path.join(ROOT, P["csv"])
     SLOTS, ENC, ORIG_IMPDIR = P["slots"], P["enc"], P["orig_impdir"]
     DEMO_SHA256 = P["demo_sha256"]
+    STUBS = P.get("stubs")
 
 
 def is_slot(v):
@@ -275,6 +281,53 @@ def sites(pe, pred):
         i += 1
 
 
+# The junk byte SecuROM pads a stub call to six bytes with: after the call
+# (stc, clc, cmc, nop) or, where the byte after is real code, before it
+# (clc, daa, nop, inc eax). The two sets never both fit a site in CJ's.
+JUNK_AFTER = (0xF5, 0xF8, 0xF9, 0x90)
+JUNK_BEFORE = (0xF8, 0x27, 0x90, 0x40)
+
+
+def stub_sites(pe):
+    """[va] of the six bytes of each `ff 15 <slot>` SecuROM rewrote as an
+    `e8 <rel32>` call into one of its dispatchers (the profile's `stubs`)
+    and a junk byte, before or after the call."""
+    if not STUBS:
+        return []
+    tva, code = pe.text()
+    out = []
+    for i in range(1, len(code) - 6):
+        if code[i] != 0xE8:
+            continue
+        va = tva + i
+        if ENC[0] <= va < ENC[1]:
+            continue
+        t = (va + 5 + struct.unpack_from("<i", code, i + 1)[0]) & 0xFFFFFFFF
+        if not STUBS[0] <= t < STUBS[1]:
+            continue
+        if code[i + 5] in JUNK_AFTER:
+            out.append(va)
+        elif code[i - 1] in JUNK_BEFORE:
+            out.append(va - 1)
+        else:
+            print("demoimports: stub call at 0x%08x has no junk byte either side" % va, file=sys.stderr)
+    return out
+
+
+def unthunk(pe):
+    """A copy of the image with each stub call written back as `ff 15
+    <SLOTS[0]>`, so the linear sweep stays in step past its junk byte and
+    the site reads like the redirected `ff 15` sites."""
+    d = bytearray(pe.d)
+    for va in stub_sites(pe):
+        o = pe.off(va)
+        d[o:o + 2] = b"\xff\x15"
+        struct.pack_into("<I", d, o + 2, SLOTS[0])
+    out = copy.copy(pe)
+    out.d = bytes(d)
+    return out
+
+
 def disasm(pe):
     """[(va, token)] of .text by a linear objdump sweep, each instruction
     normalized: numbers of 0x10000 and up (addresses) and branch targets
@@ -345,6 +398,7 @@ def score(a, b):
 
 
 def build_map(ret, demo):
+    ret = unthunk(ret)
     dimp = demo.imports()
     lo, hi = min(dimp), max(dimp) + 4
     R = [va for va, _ in sites(ret, is_slot)]
@@ -374,8 +428,8 @@ def build_map(ret, demo):
     # the shift of each site paired unambiguously (one best candidate)
     sure = {}
     for r, c, sc in scored:
-        if sc and (len(sc) == 1 or sc[0][0] > sc[1][0]):
-            sure[r] = r - sc[0][1]
+        if sc and (len(sc) == 1 or sc[0][0] > sc[1][0]) and sc[0][0] >= (len(c) - 1) * 2 // 3:
+            sure[r] = r - sc[0][1]          # a clear best that reads mostly the same
     order = sorted(sure)
 
     def near_shifts(r):
@@ -658,7 +712,9 @@ def cmd_plain(args):
     fixed, unknown = fix_branches(img, ret, demo, segs, rows)
     m = load_map()
     for site, slot in m.items():
-        struct.pack_into("<I", img, ret.off(site) + 2, slot)
+        o = ret.off(site)
+        img[o:o + 2] = b"\xff\x15"          # a stub call's e8 and junk byte too
+        struct.pack_into("<I", img, o + 2, slot)
     # the PE header's import directory back on the original one, so a
     # disassembler names the IAT slots
     e = struct.unpack_from("<I", img, 0x3C)[0]
