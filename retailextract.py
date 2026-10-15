@@ -9,6 +9,10 @@
   retailextract.py launcherres <retaildir> <resdir>   the launcher's art and
                                                       sound, out of the retail
                                                       NOLF.exe's resources
+  retailextract.py nolfservres <retaildir> <resdir>   the dedicated server's
+                                                      icons and wizard art, out
+                                                      of the retail
+                                                      NolfServ.exe's resources
   retailextract.py goty        <retaildir> <outdir>   the Game of the Year text
                                                       our CRes.dll is built
                                                       with, out of the retail
@@ -61,6 +65,12 @@ of the retail NOLF.exe (the image is parsed in memory, never
 written anywhere or run) and written back as the .bmp / .pal / .wav / .ico
 / .cur files rc.exe compiles into our NOLF.exe.
 
+`nolfservres` does the same for the dedicated server, NolfServ.exe: the
+two icons and the setup wizard's bitmap nolfserv.rc includes from
+src/engine/nolfserv/res/. (Its other binary resources, a cursor and four
+bitmaps, are MFC's own, which nolfserv.rc takes from the toolchain's
+afxres.rc as the original did.)
+
 `goty` writes the two things the retail Game of the Year CRES.dll (in
 NOLFGOTY.REZ) has and Monolith's v1.003 source of it does not: the
 string tables of the Game of the Year content (string IDs 30000-30095: the
@@ -70,8 +80,8 @@ compiles them into our CRes.dll with the release's own resource script, so its
 resources are the retail ones. The retail DLL is read in memory, never
 written anywhere or run; the text stays out of this repository.
 
-`reference` copies the retail lithtech.exe, server.dll, d3d.ren, NOLF.exe and
-ltmsg.dll, and the Game of the Year CShell.dll, Object.lto and CRes.dll out of
+`reference` copies the retail lithtech.exe, server.dll, d3d.ren, NOLF.exe,
+NolfServ.exe and ltmsg.dll, and the Game of the Year CShell.dll, Object.lto and CRes.dll out of
 NOLFGOTY.REZ, to a reference directory (build/reference.sh: out/reference/). They
 are what tools/progress.py, `build/engine.sh ... verify` and the
 reconstruction tools compare our objects against; the build never reads
@@ -111,7 +121,8 @@ THIRD_PARTY_NAMES = {"mss32.dll", "binkw32.dll"}
 THIRD_PARTY_EXTS = {".flt", ".m3d", ".asi", ".as6"}
 
 # The retail images the checks compare against (`reference`).
-REFERENCE = ["lithtech.exe", "server.dll", "d3d.ren", "NOLF.exe", "ltmsg.dll"]
+REFERENCE = ["lithtech.exe", "server.dll", "d3d.ren", "NOLF.exe", "NolfServ.exe",
+             "ltmsg.dll"]
 # ... and the retail game DLLs, which the retail game only holds inside the .rez
 # archives (the game loads them from there). There are three generations:
 # NOLF2.REZ has the original release's, nolfu003.rez the 1.003 update's, and
@@ -458,6 +469,24 @@ def cmd_launcherres(retaildir, resdir):
     print(f"== {r.name}:{p} resources -> {resdir}/ ({', '.join(out)})")
 
 
+def cmd_nolfservres(retaildir, resdir):
+    r = Retail(retaildir)
+    p = r.find("NolfServ.exe")
+    res = pe_resources(r.read(p))
+    out = {
+        "nolfserv.ico": icon_file(res, 128),      # IDR_MAINFRAME
+        "selected.ico": icon_file(res, 133),      # IDI_SELECTED
+        "wizard.bmp": bmp_file(res[(RT_BITMAP, 139)]),   # IDB_WIZARD
+    }
+    resdir = Path(resdir)
+    resdir.mkdir(parents=True, exist_ok=True)
+    for name, data in out.items():
+        dest = resdir / name
+        if not dest.exists() or dest.read_bytes() != data:
+            dest.write_bytes(data)
+    print(f"== {r.name}:{p} resources -> {resdir}/ ({', '.join(out)})")
+
+
 # The GOTY string blocks: string IDs 30000-30095 are blocks 1876-1881 (a block
 # holds IDs 16*(n-1) .. 16*(n-1)+15). These are exactly what the retail DLL has
 # and ours lacks (tools/rsrcdiff.py); refuse a retail DLL where that is not so.
@@ -599,6 +628,8 @@ def main():
         cmd_openruntime(sys.argv[2], sys.argv[3])
     elif cmd == "launcherres" and len(sys.argv) == 4:
         cmd_launcherres(sys.argv[2], sys.argv[3])
+    elif cmd == "nolfservres" and len(sys.argv) == 4:
+        cmd_nolfservres(sys.argv[2], sys.argv[3])
     elif cmd == "goty" and len(sys.argv) == 4:
         cmd_goty(sys.argv[2], sys.argv[3])
     elif cmd == "reference" and len(sys.argv) == 4:
