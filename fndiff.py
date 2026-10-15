@@ -9,7 +9,7 @@ project has already proven (guides/09-codegen-patterns.md).
 
 Usage:
   fndiff.py <ship-addr> <obj> <symbol-substr> [--image=<target or image>]
-            [--end=0xADDR] [--csv=out/reference/<stem>-functions.csv]
+            [--end=0xADDR|DECIMAL|+SIZE] [--csv=out/reference/<stem>-functions.csv]
 
   --image takes a target of progress/targets.py (`server`, `Lithtech`,
   tools/tgt.py) or an image path. Without it, the target is the one whose
@@ -159,6 +159,21 @@ def reloc_offsets(obj, sym):
 
 
 
+def parse_end(text, start):
+    """--end: 0x-prefixed (or a-f bearing) hex, decimal digits (what a
+    shell's $((start+size)) prints), or +size in bytes. A digits-only value
+    that is not past the start is taken as hex, the old reading."""
+    t = text.strip().lower()
+    if t.startswith("+"):
+        return start + int(t[1:], 0)
+    if t.startswith("0x") or any(c in "abcdef" for c in t):
+        return int(t, 16)
+    end = int(t, 10)
+    if end <= start:
+        end = int(t, 16)
+    return end
+
+
 def _trim_trailing_table(image, start, end):
     """Drop a trailing jump table from a shipped extent. See the call site."""
     try:
@@ -221,7 +236,7 @@ def main():
 
     start = int(addr, 16)
     if "--end" in opts:
-        end = int(opts["--end"], 16)
+        end = parse_end(opts["--end"], start)
     else:
         end = None
         try:
