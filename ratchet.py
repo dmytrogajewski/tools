@@ -53,6 +53,7 @@ ROWS = [
     ("`server.dll`", "the server", ["server.dll"]),
     ("`d3d.ren`", "the Direct3D renderer", ["d3d.ren"]),
     ("`NOLF.exe`", "the launcher", ["NOLF.exe"]),
+    ("`NolfServ.exe`", "the dedicated server", ["NolfServ.exe"]),
     ("lithshared", "the shared libraries", LIBS),
     ("`CShell.dll`", "the game: client", ["CShell.dll"]),
     ("`Object.lto`", "the game: server objects", ["Object.lto"]),

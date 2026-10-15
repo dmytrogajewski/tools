@@ -32,7 +32,8 @@ requires both at zero). unplaced, unlinked and driver rows are ours, not
 shipped functions: none of them is in the denominator.
 
 Ground truth is always the SHIPPED binary, so the denominator can't drift.
-The engine images (lithtech.exe, server.dll, d3d.ren, NOLF.exe) come from the
+The engine images (lithtech.exe, server.dll, d3d.ren, NOLF.exe, NolfServ.exe)
+come from the
 installed retail game into out/reference/ (`tools/retailextract.py
 reference`), and so do the
 Game of the Year game DLLs (CShell.dll, Object.lto, CRes.dll, out of
@@ -190,7 +191,8 @@ GAME_RES = ("CRes.dll", REFERENCE + "/CRes.dll", "src/game/ClientRes/Release/CRe
 GAME_LABELS = {g[0] for g in GAME} | {GAME_RES[0]}
 
 # Monolith's own code within each image. Everything above these ranges is the
-# statically linked CRT (and MFC in NOLF.exe's case) — real code in the binary,
+# statically linked CRT (and MFC in NOLF.exe's and NolfServ.exe's case) — real
+# code in the binary,
 # but supplied by the toolchain, so it is NOT a reconstruction target. Counting
 # it would understate progress as badly as counting only what we attempted
 # would overstate it. Functions outside the range are recorded as "crt" and
@@ -204,6 +206,19 @@ APP_REGION = {
     # statically linked MFC (AfxGetMainWnd, the multi-monitor stubs, CArchive
     # operators) and then the CRT (_splitpath, strncpy, ...).
     "NOLF.exe":   (0x401000, 0x409ed2),
+    # NolfServ.exe: Monolith's objects in link order (CustomDlg, the
+    # launcher's dlgcustom, NetDefs, the option pages, ServerApp, ServerDlg,
+    # SessionDlg, WizardDlg, WorldsDlg: 0x401000 .. 0x40aa0f), then the
+    # lithshared libraries it links, which are ours as RegMgr.lib is in
+    # NOLF.exe: CryptMgr (Encrypt 0x40aa10 .. Blowfish_decipher), RegMgr
+    # (CRegMgr::Init 0x40b460 ..) and ButeMgr, MFC flavour (CReservedWords
+    # 0x40b7f0 .. its zTools objects, the last being zSLink::freecache at
+    # 0x410190, 34 bytes). Every library function with a unique hit lies in
+    # 0x40aa10 .. 0x4101b2. From 0x4101c0 on it is the static MFC
+    # (CPropertySheet::GetTabControl, AfxGetMainWnd, the multi-monitor
+    # stubs, AfxEnableControlContainer: nafxcw.lib members matched byte for
+    # byte), then the CRT.
+    "NolfServ.exe": (0x401000, 0x4101b2),
     # server.dll: the static CRT (libcmt.lib) begins at _ftol, 0x1003e0f0.
     # Evidence: every libcmt.lib member was searched for in .text (masked by
     # its own relocations, asm labels included); the lowest real hit is
@@ -507,6 +522,7 @@ _EXCLUDE_IMAGE = {
     "d3d":      "d3d.ren",
     "cshell":   "CShell.dll",
     "object":   "Object.lto",
+    "nolfserv": "NolfServ.exe",
 }
 
 
@@ -550,6 +566,7 @@ def _phantom_reasons(label=None):
 
 LINKED = {   # our whole-exe link, used as a second, unmasked oracle
     "NOLF.exe": "src/engine/launcher/Release/NOLF.exe",
+    "NolfServ.exe": "src/engine/nolfserv/Release/NolfServ.exe",
 }
 
 # Our own link of each image: its .map says where each of our functions went,
@@ -558,6 +575,7 @@ LINKED = {   # our whole-exe link, used as a second, unmasked oracle
 # what the join in _rows_for_image places functions by.
 OUR_MAP = {
     "NOLF.exe":     "src/engine/launcher/Release/NOLF.map",
+    "NolfServ.exe": "src/engine/nolfserv/Release/NolfServ.map",
     "server.dll":   "src/engine/server/Release/server.map",
     "lithtech.exe": "src/engine/lithtech/Release/lithtech.map",
     "d3d.ren":      "src/engine/d3d/Release/d3d.map",
@@ -1692,7 +1710,7 @@ def main():
 
     # A missing reference image would silently drop its target from the
     # totals; refuse instead.
-    missing = [n for n in ("NOLF.exe", "lithtech.exe", "server.dll", "d3d.ren",
+    missing = [n for n in ("NOLF.exe", "NolfServ.exe", "lithtech.exe", "server.dll", "d3d.ren",
                            "CShell.dll", "Object.lto", "CRes.dll")
                if not os.path.exists(os.path.join(REFERENCE, n))]
     if missing:
@@ -1700,7 +1718,7 @@ def main():
                  "tools/retailextract.py reference <retaildir> %s"
                  % (", ".join(missing), REFERENCE, REFERENCE))
     # ... and so would a missing build: every function would read "todo".
-    unbuilt = [d for d in ("src/engine/launcher", "src/engine/server",
+    unbuilt = [d for d in ("src/engine/launcher", "src/engine/nolfserv", "src/engine/server",
                            "src/engine/lithtech", "src/engine/d3d")
                if not glob.glob(d + "/Release/*.obj")] + \
               [g[2] for g in GAME if not glob.glob(g[2] + "/*.obj")] + \
@@ -1731,7 +1749,19 @@ def main():
     exe_objs.append("src/lithshared/out/RegMgr.lib")
     all_rows += rows_for_image("NOLF.exe", REFERENCE + "/NOLF.exe", exe_objs)
 
-    started = ({label for label, _ in LIBS} if libdir else set()) | {"NOLF.exe"}
+    # NolfServ.exe: its own TUs (StdAfx.obj is empty), and the three
+    # lithshared libraries it links, from our own builds (the MFC ButeMgr
+    # has no prebuilt counterpart in the source release: it is scored here
+    # only)
+    serv_objs = sorted(
+        p for p in glob.glob("src/engine/nolfserv/Release/*.obj")
+        if os.path.basename(p).lower() != "stdafx.obj"
+    ) + ["src/lithshared/out/CryptMgr.lib", "src/lithshared/out/RegMgr.lib",
+         "src/lithshared/out/ButeMgr.lib"]
+    all_rows += rows_for_image("NolfServ.exe", REFERENCE + "/NolfServ.exe", serv_objs)
+
+    started = ({label for label, _ in LIBS} if libdir else set()) | \
+        {"NOLF.exe", "NolfServ.exe"}
 
     STARTED_ENGINE = {
         # StdLith.lib is linked into server.dll whole (0x1003d170..0x1003e0ef,
@@ -1877,7 +1907,7 @@ def main():
           f"{'funcs':>6} {'unwr':>5} {'unpl':>5} {'bytes id':>10} "
           f"{'bytes tot':>10}  {'%':>5}")
     print("-" * 105)
-    order = ([l for l, _ in LIBS] if libdir else []) + ["NOLF.exe"] + \
+    order = ([l for l, _ in LIBS] if libdir else []) + ["NOLF.exe", "NolfServ.exe"] + \
             [l for l, _ in ENGINE if l in targets and targets[l]["started"]] + \
             [g[0] for g in GAME]
     for label in order:
