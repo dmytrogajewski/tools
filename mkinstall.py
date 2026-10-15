@@ -33,9 +33,11 @@ byte. The list goes at the end of each script, after a marker line; the
 scripts' code is build/game-scripts/linux-install.sh and windows-install.ps1
 (the .bat's header is written here).
 
-Writes <outdir>/linux-install.sh, <outdir>/windows-install.bat and
+Writes <outdir>/linux-install.sh, <outdir>/windows-install.bat,
 <outdir>/disc-files.txt, the game directory's paths the scripts write (the
-archive leaves them out). <isodir> is rez/isos/ by default; the discs'
+archive leaves them out), and <outdir>/disc-sums.txt, the SHA-256 of each of
+those but autoexec.cfg, which the engine rewrites (build/package.sh puts them
+in the archive's SHA256SUMS). <isodir> is rez/isos/ by default; the discs'
 installed copy, rez/games/nolf-eu-goty/, says where each retail file came
 from. Exits 3 if the disc images are not there.
 """
@@ -290,7 +292,7 @@ def main():
 
     # autoexec.cfg is the shipped defaults.cfg (build/package.sh); the
     # scripts write it only if there is none, as the engine rewrites it.
-    records, literal = [], 0
+    records, literal, sums = [], 0, []
     for rel in sorted(wanted, key=str.lower):
         path = os.path.join(game, rel)
         ops = ops_for(wanted[rel], path)
@@ -298,6 +300,7 @@ def main():
             sys.exit(f"mkinstall: {rel}: not made from its retail file")
         literal += ops.literal
         size, sha = os.path.getsize(path), sha256(path)
+        sums.append(f"{sha}  {rel}")
         records.append(f"F {rel} {size} {sha} -")
         records.extend(ops.lines())
         records.append("E")
@@ -333,6 +336,8 @@ def main():
         for rel in sorted(wanted, key=str.lower):
             f.write(rel + "\n")
         f.write("autoexec.cfg\n")
+    with open(os.path.join(outdir, "disc-sums.txt"), "w", newline="\n") as f:
+        f.write("".join(line + "\n" for line in sums))
     print(f"   install scripts: {len(wanted) + 1} files from the discs, "
           f"{literal} bytes of ours")
 
