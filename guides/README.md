@@ -109,8 +109,8 @@ status (`identical`, `near`, `small`, `attempted`, `todo`, `crt`; see
 a `make`.
 
 **What counts as a target.** Every image statically links the C runtime (and
-MFC, in `NOLF.exe`). That code is real, but the toolchain supplies it -- it is
-not something to reconstruct. Functions outside Monolith's own `APP_REGION`
+MFC, in `NOLF.exe` and `NolfServ.exe`). That code is real, but the toolchain
+supplies it -- it is not something to reconstruct. Functions outside Monolith's own `APP_REGION`
 (see `tools/progress.py`) are recorded as `crt` and left out of the counts.
 
 To find work:
@@ -146,6 +146,7 @@ The flags decide everything before you start:
 | `lithtech.exe` | cl 8447 | `/O2` (a few files with their own flags) |
 | `d3d.ren` | Intel C/C++ 4.0 | per-file groups (`/O2`, `/Os`, `/Qip`, ...) |
 | `NOLF.exe`, `ltmsg.dll`, `sres.dll` | cl (default `msvc-6.00-9782`) | `/O2` |
+| `NolfServ.exe` | cl (default `msvc-6.00-9782`) | `/O2 /GR`, static MFC, precompiled header |
 
 The build scripts already use the right compiler and flags for every file
 (`build/build.mk` lists them); the evidence for each choice is in
