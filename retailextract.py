@@ -316,6 +316,7 @@ OPEN_RUNTIME = [
 REPO = Path(__file__).resolve().parent.parent
 DIRECTMUSIC_SRC = REPO / "toolchains" / "directmusic-5.3.1.904"
 DIRECTMUSIC_MANIFEST = REPO / "src" / "modern" / "directmusic" / "lithtech.exe.manifest"
+FONT_SRC = REPO / "src" / "modern" / "fonts"
 DIRECTMUSIC = ["dmband.dll", "dmcompos.dll", "dmime.dll", "dmloader.dll", "dmscript.dll",
                "dmstyle.dll", "dmsynth.dll", "dmusic.dll", "dswave.dll"]
 
@@ -372,6 +373,15 @@ def cmd_openruntime(extdir, gamedir):
         man.add(name, f"EXT {origin} (build/ext.sh)")
         print(f"   {name}  <-  {origin}")
     ndm = install_directmusic(gamedir, man)
+    # The modern build's TrueType fonts (nolfsrc M-P3-24, M-P3-25), each
+    # with its licence; a game without src/modern/fonts has none.
+    fonts = sorted(p.name for p in FONT_SRC.iterdir() if p.is_file()) if FONT_SRC.is_dir() else []
+    if fonts:
+        (gamedir / "fonts").mkdir(exist_ok=True)
+    for name in fonts:
+        shutil.copyfile(FONT_SRC / name, gamedir / "fonts" / name)
+        man.add("fonts/" + name, f"THIRD-PARTY font (SIL OFL 1.1): src/modern/fonts/{name}")
+        print(f"   fonts/{name}  <-  src/modern/fonts/")
     man.save()
     print(f"== open runtime: {len(OPEN_RUNTIME)} files (OpenMiles, Bink on FFmpeg, the OpenGL and Direct3D 9 renderers)"
           + (f", and {ndm} for Microsoft's DirectMusic" if ndm else ""))
