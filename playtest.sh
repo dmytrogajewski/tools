@@ -36,6 +36,8 @@
 #   wait <secs>           sleep (fractions allowed)
 #   key <keysym>...       tap keys (X keysyms: w a s d space c f Escape F6
 #                         F9 1 2 Shift_L Left Right Return ...)
+#   type <text>           type the text (the rest of the line, its spaces
+#                         as single spaces; no '#'), a key every 0.1s
 #   hold <keysym> <secs>  hold a key down for <secs>
 #   down <keysym> / up <keysym>   press / release (combine with turn etc.)
 #   turn <dx> <dy> [steps]   relative mouse motion, split into <steps>
@@ -49,14 +51,35 @@
 #                         (default 90s); if the HUD never comes up, the
 #                         run is judged NO HUD, a failure
 #   shot <name>           screenshot the game window -> shots/NN-<name>.png
+#   screen <name>         screenshot the whole display (the window on it)
 #   focus                 re-focus the game window
+#   minimize / restore    iconify the game window (it loses the focus) /
+#                         map and activate it again (a window manager's
+#                         job: PLAYTEST_WM)
 #   mmove <x> <y>         move the pointer to a point of the menus' 640x480
 #                         page, mapped to the window as PLAYTEST_MAP says:
 #                         "retail" (the page centred, unscaled; the default
 #                         for a release build) or "modern" (the centred 4:3
-#                         area, scaled by the height: MODERN.md M-G2; the
+#                         area, scaled by the height: docs/MODERN.md M-G2; the
 #                         default for a game directory named *modern*)
 #   mclick <x> <y>        the same, then a click of button 1
+#   pad [button...] [axis=value...]
+#                         the test controller (the modern build's ##gamepad,
+#                         docs/MODERN.md M-E20, which in a scripted run reads its
+#                         state from the file NOLF2SRC_PADTEST names, not
+#                         from XInput): the buttons held from now on -- a b
+#                         x y lb rb back start ls rs up down left right (the
+#                         d-pad) -- and the axes, lx ly rx ry -100..100 (y up
+#                         positive) and lt rt 0..100; what is not named is
+#                         released / centred. `pad` alone: all released;
+#                         `pad off`: no controller connected (the start)
+#   tap <button>...       press and release pad buttons in turn (0.1s each)
+#   wfocus <regex> [timeout]   wait (default 60s) for a visible window whose
+#                         name matches, and focus it (the launcher's
+#                         dialogs: PLAYTEST_LAUNCH)
+#   wclick <regex> <x> <y>    click at a point of that window (its own
+#                         coordinates)
+#   sclick <x> <y>        click at a point of the display
 # After every command the runner checks the game process; if it has died the
 # script stops and the run is judged (EXITED / CRASHED, naming the line).
 # Everything that happened goes to script.log; shots.png is a contact sheet
@@ -77,11 +100,26 @@
 #                         (e.g. 1280x720, 1920x1080)
 #   PLAYTEST_WINDOWED=1   a window instead of full screen (Wine's frame
 #                         makes it smaller than the display)
+#   PLAYTEST_SCREEN=WxH   the virtual display's size, when it should not be
+#                         the screen mode's (a window on a larger desktop)
+#   PLAYTEST_WM=<command> a window manager to run on the display first
+#                         (e.g. openbox; it must be in the image: Xvfb
+#                         alone has none, so no frame, focus or placement)
 #   PLAYTEST_ARGS="..."   more engine arguments (e.g. +DisableSound 1)
 #   PLAYTEST_CFG=<file>   console variables appended to the run's
 #                         autoexec.cfg (lines like "UIScale" "1.000000")
 #   PLAYTEST_SAVES=<dir>  start a scripted run with a copy of these saved
 #                         games as its Save/ (instead of none)
+#   PLAYTEST_LAUNCH="..." start the game with `wine <this>` in the run
+#                         directory instead of `wine Lithtech.exe -cmdfile
+#                         nolf2cmds.txt`: e.g. "NOLF2.exe" (the launcher),
+#                         "Lithtech.exe" (no arguments), "cmd /c
+#                         windows-run.bat". The game counts as running while
+#                         that program or a Lithtech.exe is (the launcher
+#                         exits once it has started the engine).
+#   PLAYTEST_PREFIX=<dir> the Wine prefix (default: the container's; a
+#                         relative path is from the repository); a new
+#                         directory is a fresh prefix, no registry values
 # The default keys (defctrls.cfg): WASD move, arrows turn, Space jump,
 # C duck, F / mouse 1 fire, R reload, Shift_L next weapon, 1-0 weapons,
 # E activate, F6 quicksave, F9 quickload, Escape menu.
@@ -127,7 +165,8 @@ rm -rf "$RUN"; mkdir -p "$RUN"
 REL="$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "$GAME" "$RUN")"
 for f in "$GAME"/*; do
     b=$(basename "$f")
-    case "$b" in autoexec.cfg|Save|Profiles|nolf2cmds.txt|MANIFEST.txt|linux-run.sh|linux-run-launcher.sh|run-cmds.txt|launchcmds.txt) continue ;; esac
+    # (MANIFEST.txt is linked: windows-run.bat reads it)
+    case "$b" in autoexec.cfg|Save|Profiles|nolf2cmds.txt|linux-run.sh|linux-run-launcher.sh|run-cmds.txt|launchcmds.txt) continue ;; esac
     if [ -f "$f" ] && [ "$(head -c 2 "$f" | tr -d '\0')" = MZ ]; then cp "$f" "$RUN/$b"
     else ln -s "$REL/$b" "$RUN/$b"; fi
 done
@@ -156,6 +195,8 @@ if [ -n "${PLAYTEST_RES:-}" ]; then
     CMDS="$(echo "$CMDS" | sed -E "s/\+\+screenwidth [0-9]+/++screenwidth $RW/; s/\+\+screenheight [0-9]+/++screenheight $RH/; s/\+\+bitdepth [0-9]+/++bitdepth 32/")"
     SCREEN="${RW}x${RH}"
 fi
+# a desktop of another size than the mode (a window on a larger screen)
+[ -n "${PLAYTEST_SCREEN:-}" ] && SCREEN="$PLAYTEST_SCREEN"
 if [ "$WORLD" = - ]; then printf '%s\n' "$CMDS" > "$RUN/nolf2cmds.txt"
 else printf '%s +runworld %s\n' "$CMDS" "$WORLD" > "$RUN/nolf2cmds.txt"; fi
 [ -n "${PLAYTEST_CFG:-}" ] && { cat "$(abs "$PLAYTEST_CFG")" >> "$RUN/autoexec.cfg" || exit 2; }
@@ -165,9 +206,21 @@ cat > "$RUN/runner.sh" <<'RUNNER'
 #!/bin/bash
 # $1 = seconds (idle mode: total; script mode: extra after the script)
 SECS=$1
-wine Lithtech.exe -cmdfile nolf2cmds.txt > wine.log 2>&1 &
-PID=$!
-alive() { kill -0 $PID 2>/dev/null; }
+# a window manager first, when asked for (PLAYTEST_WM): it frames, places
+# and focuses the game's windows, as a desktop's does
+if [ -n "${PLAYTEST_WM:-}" ]; then
+    $PLAYTEST_WM > wm.log 2>&1 &
+    sleep 2
+fi
+if [ -n "${PLAYTEST_LAUNCH:-}" ]; then
+    wine $PLAYTEST_LAUNCH > wine.log 2>&1 &
+    PID=$!
+    alive() { kill -0 $PID 2>/dev/null || pgrep -fi 'lithtech\.exe' >/dev/null; }
+else
+    wine Lithtech.exe -cmdfile nolf2cmds.txt > wine.log 2>&1 &
+    PID=$!
+    alive() { kill -0 $PID 2>/dev/null; }
+fi
 STOPPED=""; NOHUD=""
 
 if [ -f script.txt ]; then
@@ -196,6 +249,24 @@ if [ -f script.txt ]; then
             printf "%d %d", x, y }')"
         set -- $p
         xdotool mousemove $((WX+1+$1)) $((WY+1+$2))
+    }
+    # the test controller's state -> $NOLF2SRC_PADTEST (see `pad`), written
+    # whole and renamed, so the game never reads half a line
+    padset() {
+        local b=0 lx=0 ly=0 rx=0 ry=0 lt=0 rt=0 a v
+        if [ "${1:-}" = off ]; then rm -f "$NOLF2SRC_PADTEST"; return; fi
+        for a in "$@"; do
+            case "$a" in
+                up) b=$((b|0x1)) ;; down) b=$((b|0x2)) ;; left) b=$((b|0x4)) ;; right) b=$((b|0x8)) ;;
+                start) b=$((b|0x10)) ;; back) b=$((b|0x20)) ;; ls) b=$((b|0x40)) ;; rs) b=$((b|0x80)) ;;
+                lb) b=$((b|0x100)) ;; rb) b=$((b|0x200)) ;;
+                a) b=$((b|0x1000)) ;; b) b=$((b|0x2000)) ;; x) b=$((b|0x4000)) ;; y) b=$((b|0x8000)) ;;
+                l[xy]=*|r[xy]=*) v=$(( ${a#*=} * 32767 / 100 )); eval "${a%%=*}=$v" ;;
+                l[t]=*|r[t]=*) v=$(( ${a#*=} * 255 / 100 )); eval "${a%%=*}=$v" ;;
+                *) log "  pad: unknown $a" ;;
+            esac
+        done
+        echo "$b $lx $ly $rx $ry $lt $rt" > "$NOLF2SRC_PADTEST.part" && mv -f "$NOLF2SRC_PADTEST.part" "$NOLF2SRC_PADTEST"
     }
     grab() { xwd -root -silent | convert xwd:- -crop "${WW}x${WH}+${WX}+${WY}" +repage "$@"; }
     # is the HUD up (= the player is in control)? The health bar: red, at
@@ -226,6 +297,7 @@ if [ -f script.txt ]; then
                 log "  window $WIN ${WW}x${WH}+${WX}+${WY}" ;;
             wait)  sleep "$1" ;;
             key)   for k in "$@"; do xdotool keydown "$k"; sleep 0.08; xdotool keyup "$k"; sleep 0.12; done ;;
+            type)  xdotool type --delay 100 -- "$*" ;;
             hold)  xdotool keydown "$1"; sleep "$2"; xdotool keyup "$1" ;;
             down)  xdotool keydown "$1" ;;
             up)    xdotool keyup "$1" ;;
@@ -243,9 +315,30 @@ if [ -f script.txt ]; then
                 if [ $clear -ge 4 ]; then log "  skipcine done after $(( $(date +%s) - st ))s"
                 else NOHUD="line $LINE"; log "  skipcine: no HUD after $(( $(date +%s) - st ))s"; fi ;;
             shot)  N=$((N+1)); f=$(printf 'shots/%02d-%s.png' $N "$1"); grab "$f"; log "  -> $f" ;;
+            screen) N=$((N+1)); f=$(printf 'shots/%02d-%s.png' $N "$1"); xwd -root -silent | convert xwd:- "$f"; log "  -> $f (the display)" ;;
             focus) focuswin ;;
+            minimize) [ -n "$WIN" ] && xdotool windowminimize "$WIN" 2>/dev/null ;;
+            restore) [ -n "$WIN" ] && { xdotool windowmap "$WIN" 2>/dev/null; xdotool windowactivate "$WIN" 2>/dev/null || focuswin; } ;;
             mmove) pagemove "$1" "$2" ;;
             mclick) pagemove "$1" "$2"; sleep 0.4; xdotool mousedown 1; sleep 0.1; xdotool mouseup 1 ;;
+            pad)   padset "$@" ;;
+            tap)   for k in "$@"; do padset "$k"; sleep 0.1; padset; sleep 0.25; done ;;
+            wfocus)
+                to=${2:-60}; s=0; W=""
+                while [ $s -lt $((to*2)) ] && alive; do
+                    W=$(xdotool search --onlyvisible --name "$1" 2>/dev/null | tail -1)
+                    [ -n "$W" ] && break; sleep 0.5; s=$((s+1))
+                done
+                if [ -n "$W" ]; then xdotool windowfocus "$W" 2>/dev/null; log "  window $W: $(xdotool getwindowname "$W" 2>/dev/null)"
+                else log "  no window named $1"; fi ;;
+            wclick)
+                W=$(xdotool search --onlyvisible --name "$1" 2>/dev/null | tail -1)
+                if [ -n "$W" ]; then
+                    eval "$(xdotool getwindowgeometry --shell "$W" 2>/dev/null)"
+                    xdotool mousemove $((X+$2)) $((Y+$3)); sleep 0.3; xdotool click 1
+                    log "  clicked $W at $2,$3"
+                else log "  no window named $1"; fi ;;
+            sclick) xdotool mousemove "$1" "$2"; sleep 0.3; xdotool click 1 ;;
             *)     log "  unknown command: $cmd" ;;
         esac
     done < <(tr -d '\r' < script.txt)
@@ -285,10 +378,17 @@ if [ ! -e /dev/snd ] && [ -f /usr/share/alsa/alsa.conf ]; then
     export ALSA_CONFIG_PATH="$RUN/asound.conf"
 fi
 export WINEDEBUG=${PLAYTEST_WINEDEBUG:--all,+seh} WINEDLLOVERRIDES=${PLAYTEST_DLLOVERRIDES-winedbg.exe=d}
-[ -n "${PLAYTEST_PREFIX:-}" ] && export WINEPREFIX=$PLAYTEST_PREFIX
-# the modern build lays its menus out in the centred 4:3 area (MODERN.md M-G2)
+# (Wine wants it absolute: a relative one is the repository's)
+case "${PLAYTEST_PREFIX:-}" in
+    "") ;;
+    /*) export WINEPREFIX=$PLAYTEST_PREFIX ;;
+    *)  export WINEPREFIX=$REPO/$PLAYTEST_PREFIX ;;
+esac
+# the modern build lays its menus out in the centred 4:3 area (docs/MODERN.md M-G2)
 case "$(basename "$GAME")" in *modern*) DEFMAP=modern ;; *) DEFMAP=retail ;; esac
 export PLAYTEST_MAP="${PLAYTEST_MAP:-$DEFMAP}"
+# a scripted run's controller is the test pad, and starts unplugged (`pad`)
+[ -n "$SCRIPT" ] && export NOLF2SRC_PADTEST=padtest.txt
 xvfb-run -a -s "-screen 0 ${SCREEN}x24" bash runner.sh $SECS
 )
 cat "$RUN/result.txt" 2>/dev/null || echo "NO RESULT (the run failed)"
