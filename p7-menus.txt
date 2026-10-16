@@ -1,0 +1,90 @@
+# p7-menus.txt -- M-P7-05/M-P7-06 check for tools/playtest.sh, run on the
+# modern build with no world (-): the test pad (`pad`) walks the menus --
+# skipping the intro movies with Escape, then down twice to Options, A into
+# it, down twice to Controls and A, A on Customize controls (the pad's
+# buttons are listed beside the keys), B back, down four times to
+# Controller and A (its sliders), and B back.
+window
+wait 3
+key Escape
+wait 3
+key Escape
+wait 3
+key Escape
+wait 3
+key Escape
+wait 3
+key Escape
+wait 3
+key Escape
+wait 8
+shot main
+pad down
+wait 0.25
+pad
+wait 0.8
+pad down
+wait 0.25
+pad
+wait 0.8
+shot on-options
+pad a
+wait 0.25
+pad
+wait 0.8
+wait 1
+shot options
+pad down
+wait 0.25
+pad
+wait 0.8
+pad down
+wait 0.25
+pad
+wait 0.8
+pad a
+wait 0.25
+pad
+wait 0.8
+wait 1
+shot controls
+pad a
+wait 0.25
+pad
+wait 0.8
+wait 1
+shot customize
+pad b
+wait 0.25
+pad
+wait 0.8
+wait 1
+shot controls-again
+pad down
+wait 0.25
+pad
+wait 0.8
+pad down
+wait 0.25
+pad
+wait 0.8
+pad down
+wait 0.25
+pad
+wait 0.8
+pad down
+wait 0.25
+pad
+wait 0.8
+pad a
+wait 0.25
+pad
+wait 0.8
+wait 1
+shot controller
+pad b
+wait 0.25
+pad
+wait 0.8
+wait 1
+shot back

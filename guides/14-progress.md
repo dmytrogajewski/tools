@@ -94,13 +94,18 @@ PASS: every function recorded as byte-identical still is
 ```
 
 The first table is this run; the second is this run against the baseline,
-and the one to read after a change. It fails (non-zero exit) when:
+and the one to read after a change. Resources are rows too: `CRes.dll`, and
+each engine image's as a target of its own (`lithtech.exe:rsrc`, ...), one
+row per resource, held like functions and kept out of the total, which
+counts code. It fails (non-zero exit) when:
 
 * a function listed in `progress/identical.txt` is no longer identical,
 * a target's identical byte count went down,
-* a target's count of **unwritten** or **unplaced** functions went up, or
+* a target's count of **unwritten** or **unplaced** functions went up,
 * `README.md`'s table is not the one `progress/summary.json` renders (someone
-  edited one without the other).
+  edited one without the other), or
+* the data check finds text that differs from the retail images and is not
+  in `progress/data-known.txt` (below, "The data check").
 
 New identical functions **pass**, with a reminder that they are not recorded
 yet. Run it before you hand anything in; CI runs it on every push and pull
@@ -117,11 +122,12 @@ When a run is better than the baseline, lock it in:
 
 ```sh
 make progress-update NOLF_SOURCE=~/nolfsrc
-git add progress/identical.txt progress/summary.json README.md
+git add progress/identical.txt progress/summary.json progress/data-known.txt README.md
 ```
 
 It rewrites `progress/identical.txt`, `progress/summary.json` and the README
-table, so from then on the new functions are held like the old ones. Commit
+table, so from then on the new functions are held like the old ones, and
+drops from `progress/data-known.txt` the text differences that are gone. Commit
 the three files with the source change that earned them, so the history
 shows which change made which function identical.
 
@@ -170,6 +176,34 @@ once unwritten, once unplaced. So an unplaced function is usually a near
 match the scorer could not see. Naming it for the address it reconstructs
 (`sub_<addr>`, `d3d.ren`'s convention) joins the two; a comment in `src/`
 citing the address only marks the shipped row `attempted`.
+
+## The data check
+
+After the scoring, `make progress` runs `tools/datacheck.py`, which compares
+what the scoring cannot see: the text in each image's data (every section
+but code, `.reloc` and `.rsrc`, with the import and export tables read as
+names). It prints a line per image -- how many strings only the retail image
+has, how many only ours -- and fails on any difference that
+`progress/data-known.txt` does not list:
+
+```
+data check (text outside code and resources; progress/data-known.txt):
+  lithtech.exe      3 only in retail,    0 only in ours
+  ...
+  d3d.ren          11 only in retail,    0 only in ours, 1 NEW
+NEW: d3d.ren: only in the retail image: VisRadius
+FAIL: 1 new text difference(s) from the retail images; ...
+```
+
+A NEW line is text your change added or lost: a literal spelled
+differently, a string now in twice (a file built without string pooling,
+`/Gf`), a C runtime's tables, an import. Fix it, or -- when it is meant --
+add it to `data-known.txt` under a `# ` line saying why.
+`python3 tools/datacheck.py show [image]` lists every difference, known or
+not. When a change makes a listed difference go away, the check says so
+("no longer differs"), and `make progress-update` drops the entry, so it is
+held from then on. The reference for what is read and how is
+`progress/README.md`, "The data check".
 
 ## When the enumeration is wrong: the CSVs
 
@@ -220,13 +254,16 @@ the top of each:
 * `progress.py`: `REFERENCE` (where the retail images are), `ENGINE` and
   `GAME` (each target: label, shipped image, our objects), `LIBS` and
   `SHIPPED_LIB` (libraries scored symbol by symbol against shipped `.lib`s),
-  `APP_REGION` and `APP_ISLANDS` (the address range of the developer's own
+  `GAME_RES` and `ENGINE_RES` (images whose resources are scored, resource
+  by resource), `APP_REGION` and `APP_ISLANDS` (the address range of the developer's own
   code in each image: everything else is the statically linked runtime,
   listed as `crt` and not counted), `MIDDLEWARE` (third-party code inside
   that range), `OUR_MAP` (our own link's `.map` per image), `DRIVER_OBJS`
   and `_EXCLUDE_IMAGE` (which CSV prefix belongs to which image).
-* `ratchet.py`: `LIBS` and `ROWS` (the README table's rows and what each adds
-  up), and `README`, `BEGIN` and `END` (where the table goes).
+* `ratchet.py`: `LIBS`, `ROWS` and `RES_ROWS` (the README table's rows and
+  what each adds up), and `README`, `BEGIN` and `END` (where the table goes).
+* `datacheck.py`: `IMAGES` (each image, its retail copy and ours) and
+  `KNOWN` (the list of known differences).
 
 Get `APP_REGION` right first, with evidence: it decides what the denominator
 is, and counting the runtime would understate progress as badly as counting

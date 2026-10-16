@@ -42,6 +42,19 @@ def dump(path, want, list_only=False):
         i += 1 + naux
 
     matches = [s for s in syms if want in s[0] and s[3] == 0x20 and s[2] > 0]
+    # One function, one listing. icl 4.0 gives some functions a second,
+    # static symbol at the SAME offset -- `?f$$1@@...` beside `?f@@...` (the
+    # four largest d3d.ren reconstructions carry one each) -- and both match
+    # the substring. Listing both made fndiff report the function at exactly
+    # twice its size (12,256 bytes as 24,512), which read as "icl emits 2x
+    # the code" until the symbol table was looked at. Keep one symbol per
+    # (section, offset): the external one, else the first.
+    seen = {}
+    for s in matches:
+        key = (s[2], s[1])
+        if key not in seen or (seen[key][4] != 2 and s[4] == 2):
+            seen[key] = s
+    matches = [s for s in matches if seen[(s[2], s[1])] is s]
     if list_only:
         for name, value, secnum, typ, st in matches:
             print(name)
