@@ -252,6 +252,16 @@ def our_map(image):
     return ci_path(os.path.splitext(image)[0] + ".map")
 
 
+def _lib_of(n):
+    """The library a function of ours came from, as a library's block is
+    keyed (`lib_range`, and the spans the libraries' anchored functions
+    occupy): the module of `lib(member):symbol`, without its member, in
+    lower case. A library is linked as one block, whichever of its members
+    a function is in."""
+    mod = n.split(":", 1)[0]
+    return mod.split("(", 1)[0].lower()
+
+
 def _module(lib, member):
     """The module name a function of ours is keyed by: an object's file name,
     or `lib(member)` for a library member -- the map names it `lib:member`."""
@@ -666,11 +676,12 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     matched = {}
     tiny = {}          # our functions with too few unmasked bytes to anchor
     lib_hits = {}
-    lib_range = tgt.get("lib_range", {})
+    # (keyed by library, `StdLith` or `StdLith.lib`, any case)
+    lib_range = {re.sub(r"\.lib$", "", k.lower()): v for k, v in tgt.get("lib_range", {}).items()}
     for n, (code, mask) in funcs.items():
         if n in from_lib and len(code) - len(mask) >= 8:
             lib_hits[n] = list(find(text, tva, code, mask))
-            rng = lib_range.get(n.split(":", 1)[0])
+            rng = lib_range.get(_lib_of(n))
             if rng:
                 # outside the library's established block: not the library
                 lib_hits[n] = [h for h in lib_hits[n] if rng[0] <= h < rng[1]]
@@ -678,7 +689,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     anchors = {}
     for n, h in lib_hits.items():
         if len(h) == 1:
-            anchors.setdefault(n.split(":", 1)[0], []).append(h[0])
+            anchors.setdefault(_lib_of(n), []).append(h[0])
     placed = set()
     # A generic shape (a thiscall thunk can recur at 19 addresses) otherwise
     # claims the FIRST free hit and leaves the address it was written for
@@ -721,7 +732,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             at_start = [h for h in fresh if h in start_set]
             if at_start:
                 fresh = at_start
-        anc = anchors.get(n.split(":", 1)[0]) if n in from_lib else None
+        anc = anchors.get(_lib_of(n)) if n in from_lib else None
         if anc and len(fresh) > 1:
             fresh.sort(key=lambda h: min(abs(h - a) for a in anc))
         at = (fresh or hits)[0]
@@ -739,7 +750,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             del matched[at]
             del PLACED_SYMS[(label, at)]
             continue
-        mod, sym = PLACED_SYMS[(label, at)].split(":", 1)
+        mod, sym = _lib_of(PLACED_SYMS[(label, at)]), PLACED_SYMS[(label, at)].split(":", 1)[1]
         if "?$" in sym or sym.startswith(("??_G", "??_D")):
             # template instances, deleting dtors and the iostream classes'
             # vbase dtors are emitted by every object that uses them and fold
@@ -748,7 +759,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
         l0, h0 = lib_span.get(mod, (at, at))
         lib_span[mod] = (min(l0, at), max(h0, at + matched[at]))
     for n in [n for n in tiny if n in from_lib]:
-        mod = n.split(":", 1)[0]
+        mod = _lib_of(n)
         if mod not in lib_span and mod not in lib_range:
             del tiny[n]
     # With lib_block, a library's block also takes in the unmatched
@@ -759,7 +770,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     lib_block = dict(lib_span)
     if tgt.get("lib_block"):
         def foreign(a, mod):
-            return (PLACED_SYMS.get((label, a)) or "").split(":", 1)[0] != mod
+            return _lib_of(PLACED_SYMS.get((label, a)) or "") != mod
         order = sorted(matched)
         for mod, (l0, h0) in lib_span.items():
             below = [a + matched[a] for a in order if a < l0 and foreign(a, mod)]
@@ -793,8 +804,10 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     # function built purely from relative displacements can be compared
     # byte for byte with nothing masked at all.
     linked = None
+    linked_ours = set()    # our link's addresses whose code those matches are
     if linked_path and os.path.exists(os.path.join(REPO, linked_path)):
-        linked = EnumImage(os.path.join(REPO, linked_path)).text
+        _li = EnumImage(os.path.join(REPO, linked_path))
+        linked, ltva = _li.text, _li.tlo
 
     # Enumeration finds some starts that are not functions: exception-handler
     # funclets and jump islands inside a function we have already matched, and
@@ -818,6 +831,11 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             b = text[a - tva : a - tva + n]
             if b and b in linked:
                 matched[a] = n
+                # the function of ours the bytes are: the one at the same
+                # address when the layouts agree there (several functions
+                # can have these bytes), else the first
+                o = a - ltva
+                linked_ours.add(a if linked[o:o + n] == b else ltva + linked.find(b))
 
     # Global-initializer COMDATs ($E thunks, the ??__E constructors and the
     # atexit registrations) are almost entirely relocation bytes: a `call
@@ -853,7 +871,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             if a in matched or a in small or not in_app(tgt, a):
                 continue
             if n in from_lib:
-                mod = n.split(":", 1)[0]
+                mod = _lib_of(n)
                 l0, h0 = lib_range.get(mod) or lib_block[mod]
                 if not l0 <= a < h0:
                     continue
@@ -921,9 +939,12 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     lib_near_ok = set()
     if tgt.get("lib_block"):
         layout_syms = {sym for (_o, sym) in (_our_layout(mapfile) or {})}
+        # (a static function's name carries its object, `name@<obj>.obj`,
+        # where our .map has the bare name)
         lib_near_ok = {n for n in funcs if n in from_lib and
-                       n.split(":", 1)[0] in lib_block and
-                       n.split(":", 1)[1] in layout_syms}
+                       _lib_of(n) in lib_block and
+                       re.sub(r"@[^@]+\.obj$", "", n.split(":", 1)[1])
+                       in layout_syms}
     for n, (code, mask) in sorted(funcs.items()):
         if len(code) - len(mask) < 8 or \
                 (n in from_lib and n not in lib_near_ok):
@@ -944,7 +965,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
         cand = starts
         if a0 is not None and a0 in start_set:
             cand = [a0] + [a for a in starts if a != a0]
-        blk = lib_block.get(n.split(":", 1)[0]) if n in from_lib else None
+        blk = lib_block.get(_lib_of(n)) if n in from_lib else None
         for a in cand:
             if a in matched or a in paired or not in_app(tgt, a):
                 continue
@@ -1029,7 +1050,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             placed_at[n] = a
     for a, n in paired.items():
         placed_at[n] = a
-    our_placed = {ours_at[n] for n in placed_at if n in ours_at}
+    our_placed = {ours_at[n] for n in placed_at if n in ours_at} | linked_ours
 
     # An inline function from a header is a COMDAT in every object that
     # includes it, and every copy is the same function: the linker keeps one.
