@@ -20,7 +20,12 @@ applies it to the data the build already took from the retail game:
                                  "<offset> <old hex> <new hex>", the offset
                                  in hex or decimal and negative to count
                                  from the end; the old bytes must match
-  src/modern/data/gamedir/...    the same four kinds, for files the engine
+  src/modern/data/<path>.flop    the retail texture at <path> (a .dtx,
+                                 DXT1 or 32-bit), mirrored left to right:
+                                 the DXT1 blocks are reordered and each
+                                 block's rows reversed, so nothing is
+                                 re-encoded (the file's text is a comment)
+  src/modern/data/gamedir/...    the same kinds, for files the engine
                                  reads from the game directory itself rather
                                  than from the rez archives (defctrls.cfg):
                                  a .patch applies to the game directory's
@@ -150,6 +155,44 @@ def apply_bytes(raw, recipe, name):
     return bytes(data)
 
 
+def flop_dtx(raw, name):
+    """A LithTech 2 .dtx mirrored left to right, every mip level: 32-bit
+    pixels reversed in each row, DXT1 blocks reversed in each row of blocks
+    and the four 2-bit indices of each block row reversed -- exact, nothing
+    re-encoded."""
+    import struct
+    if len(raw) < 164:
+        sys.exit(f"moddata: {name}: not a .dtx")
+    _rt, ver, w, h, nmips, nsecs = struct.unpack_from("<IiHHHH", raw, 0)
+    bpp = raw[24 + 2]
+    if ver != -5 or nsecs != 0 or bpp not in (3, 4):
+        sys.exit(f"moddata: {name}: only a version -5 .dtx, 32-bit or DXT1, without sections, can be mirrored")
+    out = bytearray(raw[:164])
+    p = 164
+    for m in range(nmips):
+        mw, mh = max(1, w >> m), max(1, h >> m)
+        if bpp == 3:
+            row = mw * 4
+            for y in range(mh):
+                line = raw[p + y * row:p + (y + 1) * row]
+                out += b"".join(line[x * 4:x * 4 + 4] for x in range(mw - 1, -1, -1))
+            p += row * mh
+        else:
+            if mw % 4 or mh % 4:
+                sys.exit(f"moddata: {name}: mip {m} ({mw}x{mh}) is not whole DXT1 blocks")
+            bw, bh = mw // 4, mh // 4
+            for by in range(bh):
+                for bx in range(bw - 1, -1, -1):
+                    blk = raw[p + (by * bw + bx) * 8:p + (by * bw + bx) * 8 + 8]
+                    rows = bytes(((b & 3) << 6) | ((b >> 2 & 3) << 4) | ((b >> 4 & 3) << 2) | (b >> 6 & 3)
+                                 for b in blk[4:])
+                    out += blk[:4] + rows
+            p += bw * bh * 8
+    if p != len(raw):
+        sys.exit(f"moddata: {name}: {len(raw) - p} bytes after the mip levels; not mirrored")
+    return bytes(out)
+
+
 def recipes(rdir):
     """(target, game path, kind, recipe file) for every recipe; target is
     "custom" or "gamedir"."""
@@ -169,6 +212,8 @@ def recipes(rdir):
                 out.append((target, rel[:-len(".from")], "from", p))
             elif f.endswith(".bytes"):
                 out.append((target, rel[:-len(".bytes")], "bytes", p))
+            elif f.endswith(".flop"):
+                out.append((target, rel[:-len(".flop")], "flop", p))
     return sorted(out)
 
 
@@ -212,6 +257,8 @@ def cmd_apply(gamedir, rdir):
                 sys.exit(f"moddata: {path}: no retail file to patch")
             if kind == "bytes":
                 content = apply_bytes(raw, recipe, path)
+            elif kind == "flop":
+                content = flop_dtx(raw, path)
             else:
                 text = raw.decode("latin-1")
                 content = apply_patch(text, open(recipe, encoding="latin-1").read(),
