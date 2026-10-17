@@ -48,7 +48,8 @@ STRIP_EXT = (".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".inl",
 # in a built/ directory, where Monolith's project files put every output
 # (Game/built/, libs/built/; spelled Built and built alike) -- and see
 # GENERATED below
-OUTPUT_DIRS = ("built",)
+# RELEASESRC_OUTPUT_DIRS names a project's own (space-separated, any case).
+OUTPUT_DIRS = tuple(d.lower() for d in os.environ.get("RELEASESRC_OUTPUT_DIRS", "built").split())
 
 DIRECTIVE = re.compile(r"^\s*#\s*(ifdef|ifndef|if|elif|else|endif)\b(.*)$")
 
@@ -145,9 +146,12 @@ def stripped_bytes(path, data=None):
 # files the build writes outside those directories (build/build.mk): the
 # generated link inputs, flex's and bison's output, CRes.dll's top resource
 # script
-# the custom build steps' outputs, written beside their sources
-GENERATED = re.compile(r"^Game/ObjectDLL/(?:ObjectShared/)?(AnimationLex\.o|AnimationParse\.o|AnimationLexSymbols\.h)$",
-                       re.I)
+# the custom build steps' outputs, written beside their sources (a
+# project's own: the regular expression RELEASESRC_GENERATED, matched
+# against the path under src/ with / separators, any case)
+GENERATED = re.compile(os.environ.get(
+    "RELEASESRC_GENERATED",
+    r"^Game/ObjectDLL/(?:ObjectShared/)?(AnimationLex\.o|AnimationParse\.o|AnimationLexSymbols\.h)$"), re.I)
 
 
 def is_output(rel):
