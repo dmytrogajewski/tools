@@ -708,22 +708,45 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
                 matched[a] = len(c)
                 PLACED_SYMS[(label, a)] = n
                 placed.add(n)
+    # Every placeable function's hits, found once. An object, like a
+    # library, is linked as one block, so its functions found at a single
+    # address anchor it: a function of it with several hits (identical
+    # initializer and destructor COMDATs recur all over an image) takes the
+    # free one nearest those, not whichever comes first in .text.
+    all_hits = {}
     for n, (code, mask) in sorted(funcs.items()):
-        if n in placed:
-            continue
-        if len(code) - len(mask) < 8:
-            tiny[n] = (code, mask)
+        if n in placed or len(code) - len(mask) < 8:
             continue
         hits = lib_hits[n] if n in lib_hits else list(find(text, tva, code, mask))
         if not hits and n in unpadded:
             # icl pads a COMDAT with multi-byte lea-nops; where the shipped
             # image has different bytes after the function the padded body
             # is found nowhere. Try the body without it.
-            code, mask = unpadded[n]
-            if len(code) - len(mask) >= 8:
-                hits = list(find(text, tva, code, mask))
+            ucode, umask = unpadded[n]
+            if len(ucode) - len(umask) >= 8:
+                hits = list(find(text, tva, ucode, umask))
+        all_hits[n] = hits
+    def _obj_local(n):
+        # Template instances and deleting destructors are emitted by every
+        # object that uses them and the linker keeps any one copy: they are
+        # not where their object is.
+        sym = n.split(":", 1)[-1]
+        return "?$" not in sym and not sym.startswith(("??_G", "??_E", "??_D"))
+    obj_anchors = {}
+    for n, hits in all_hits.items():
+        if n not in from_lib and len(hits) == 1 and _obj_local(n):
+            obj_anchors.setdefault(_lib_of(n), []).append(hits[0])
+    for n, (code, mask) in sorted(funcs.items()):
+        if n in placed:
+            continue
+        if len(code) - len(mask) < 8:
+            tiny[n] = (code, mask)
+            continue
+        hits = all_hits.get(n, [])
         if not hits:
             continue
+        if n in unpadded and not list(find(text, tva, code, mask)):
+            code, mask = unpadded[n]
         fresh = [h for h in hits if h not in matched]
         # A hit that is not an enumerated function start is a byte-run
         # inside some other function (a short body's masked shape recurring
@@ -732,7 +755,10 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             at_start = [h for h in fresh if h in start_set]
             if at_start:
                 fresh = at_start
-        anc = anchors.get(_lib_of(n)) if n in from_lib else None
+        if n in from_lib:
+            anc = anchors.get(_lib_of(n))
+        else:
+            anc = obj_anchors.get(_lib_of(n)) if _obj_local(n) else None
         if anc and len(fresh) > 1:
             fresh.sort(key=lambda h: min(abs(h - a) for a in anc))
         at = (fresh or hits)[0]

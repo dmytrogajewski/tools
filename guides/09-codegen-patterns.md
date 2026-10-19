@@ -2140,6 +2140,25 @@ its top through its own parameter slots, the source was a hand-written loop:
 
 That took talon's `ClipPoly` from 709 against 787 bytes to size-exact.
 
+**The declaration-count threshold, measured.** Bringing talon's BspGen back
+to 2001 added about nine member and method declarations to headers that
+BrushToWorld.cpp also includes. One of BrushToWorld's static destructors (an
+inlined `CMoArray` destructor, nothing to do with the new declarations)
+flipped the operand order of one `add`, and the scorer then placed it at
+another module's identical destructor. Adding dummy declarations to the
+reverted headers placed the flip between +6 and +9. Deleting three Build 69
+inline helpers nothing compiled used (CPrePoly's `CalcCenter`,
+`CalcExtents`, `OverlapExtents`) brought it back. So after any header edit,
+re-check every module already matched against the image, not only the one
+being worked on. When a match flips with no source change of its own, count
+declarations before suspecting anything else.
+
+**Which end of the function loses.** In the experiment above the calls left
+out of line were the LAST ones. The inline-budget bullet under "Levers that
+closed register allocation verdicts" says the EARLIEST sites are refused.
+Both are observations from real code. Until a case settles it, take the
+order as unknown and try both directions.
+
 ## Two rules that do NOT hold everywhere -- check before applying
 
 Both are easy to state as general rules, and both were refuted by measurement
