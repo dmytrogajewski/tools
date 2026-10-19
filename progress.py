@@ -1550,6 +1550,14 @@ def score_target(tgt):
     ours = built_image(tgt)
     if tgt["kind"] == "resources":
         return rows_for_resources(tgt, ours), ours
+    if not ours and tgt.get("partial_objs"):
+        # A build that does not link yet (talon's Processor while its
+        # sources are reconstructed module by module): score the objects
+        # it has compiled, with no map or image of ours to place them by.
+        objs = sorted({os.path.relpath(p, REPO) for g in tgt["partial_objs"]
+                       for p in glob.glob(os.path.join(REPO, g), recursive=True)})
+        if objs:
+            return rows_for_image(tgt, objs, None), None
     if not ours:
         return rows_for_unbuilt(tgt), None
     objs = link_inputs(ours)

@@ -2084,6 +2084,62 @@ need not compile alike -- the shipped bytes for the second copy the NRV temp
 into a second slot before MatMul reads it. That is a `.cpp` edit, in ORDERING
 territory, and it is source-reachable where the header is not.
 
+### The per-function inline budget, and what it leaves behind
+
+The caller-context rule above has a measurable shape. Found while matching
+talon's Processor (AvP2, cl 8966 `/O2`) and checked with throwaway files.
+
+**The budget grows with the caller and is spent top-down.** A function made
+of N identical `LTVector::Dot` calls expands 18 of 24, 22 of 32, 32 of 48 and
+43 of 64. The ones left as calls are always the LAST in source order. A
+three-line function expands all of them. So the same `_CVector` constructor,
+`MagSqr`, `Dot` or `Norm` gets expanded early in a big function and called
+late in it. When ours expands a site that the shipped code calls, or the
+other way round, the source spent its budget differently before that site.
+It is almost never the header. The two levers that have worked: how many
+helper levels the source goes through (`Append` -> `AddTail` -> `AddHead` is
+one level more than `AddTail`, and that level decided whether `AddHead` was
+expanded), and where in the function the expensive expansions sit.
+
+**An explicit destructor call that misses the budget becomes `??_G(0)`.**
+`p->~T()` (a `FreePoly`/`DeletePoly` template, or a hand-written one) is
+lowered through the scalar deleting destructor. With budget left, that
+wrapper is expanded and you see `call ??1T` (or the destructor's own body).
+Without budget, the wrapper itself stays a call:
+
+    push 0
+    mov  ecx, esi
+    call T::`scalar deleting destructor'
+    push esi
+    call free
+
+This happens with a class that has NO vtable at all. A direct `call ??_G`
+with 0 in the shipped code is a budget fact, not a virtual destructor, and no
+spelling of the destructor call reproduces it in a small function (eleven
+were tried).
+
+**A local array in the frame turns tail-recursion elimination off.** VC6
+rewrites `f(a, b); }` as a jump to the top with the parameter slots
+overwritten (`mov eax, [esp+param]` ... `jmp top`), but not when the function
+has any local array, even one whose address is never taken. Separate scalar
+locals let it through. If a shipped function with such an array jumps back to
+its top through its own parameter slots, the source was a hand-written loop:
+
+    for(;;)
+    {
+        ...
+        if(sides[BackSide])
+        {
+            if(leaf)                 ...
+            else if(sides[FrontSide]) Clip(pBrush, sides[BackSide], pNode->m_Sides[BackSide]);
+            else { pPoly = sides[BackSide]; pNode = pNode->m_Sides[BackSide]; continue; }
+        }
+        if(!sides[FrontSide] || leaf) return;
+        pPoly = sides[FrontSide]; pNode = pNode->m_Sides[FrontSide];
+    }
+
+That took talon's `ClipPoly` from 709 against 787 bytes to size-exact.
+
 ## Two rules that do NOT hold everywhere -- check before applying
 
 Both are easy to state as general rules, and both were refuted by measurement
