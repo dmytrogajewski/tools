@@ -1107,11 +1107,33 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             k = prev[k]
         return out[::-1]
 
+    # A target's `compiler_output` ranges hold the shipped image's
+    # initializers, terminators and exception funclets: ours of those
+    # (by their compiler-given names) are placed there and nowhere else,
+    # and nothing else of ours is placed there.
+    co_ranges = tgt.get("compiler_output") or ()
+
+    def co_sym(n):
+        sym = n.split(":", 1)[-1]
+        return bool(re.match(r"_?\$E\d|\?\?__[EF]|__ehhandler\$", sym))
+
+    def co_long(n):
+        # (the short ones are not placed there at all: those are a count of
+        # shapes, below)
+        code, mask = funcs[n]
+        return co_sym(n) and len(code) - len(mask) >= 8
+
+    def fits(n, a):
+        if not co_ranges:
+            return True
+        return co_long(n) if _in(co_ranges, a) else not co_sym(n)
+
     if ours_at:
-        app = [r for r in tgt.get("app", ())]
+        app = [r for r in tgt.get("app", ())] + list(co_ranges)
         lo = min(r[0] for r in app) if app else img.tlo
         hi = max(r[1] for r in app) if app else img.thi
-        free = {a for a in starts if in_app(tgt, a)
+        free = {a for a in starts
+                if (in_app(tgt, a) or _in(co_ranges, a))
                 and a not in matched and a not in paired
                 and a not in small and sizes.get(a, 0) > 0}
         joined = {"name": 0, "object": 0, "image": 0}
@@ -1140,7 +1162,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             if not unplaced_sym(n):
                 continue
             a = _own_addr(tgt, n, funcs)
-            if a in free:
+            if a in free and fits(n, a):
                 place(n, a, "name")
 
         def mine_now(keep=lambda n: True):
@@ -1156,10 +1178,14 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             u = [(n, body_len(funcs[n][0])) for o, n in mine
                  if o1 < o < o2 and n not in placed_at]
             w = [(a, sizes[a]) for a in sorted(free) if r1 < a < r2]
-            if not u or not w or len(u) * len(w) > 250000:
-                return
-            for n, a in _align(u, w):
-                place(n, a, how)
+            for co in ((False, True) if co_ranges else (None,)):
+                uu = [x for x in u if co is None or
+                      (co_long(x[0]) if co else not co_sym(x[0]))]
+                ww = [x for x in w if co is None or _in(co_ranges, x[0]) == co]
+                if not uu or not ww or len(uu) * len(ww) > 250000:
+                    continue
+                for n, a in _align(uu, ww):
+                    place(n, a, how)
 
         # 2. Within each object, by neighbourhood: a shipped function no one
         # is placed at, whose nearest placed neighbours (below or above) are
@@ -1190,7 +1216,8 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
                 su = body_len(funcs[n][0])
                 for a in ws:
                     sw = sizes.get(a, 0)
-                    if su > 0 and sw > 0 and 0.5 <= su / sw <= 2:
+                    if su > 0 and sw > 0 and 0.5 <= su / sw <= 2 and \
+                            fits(n, a):
                         pairs.append((abs(math.log(su / sw)), n, a))
             for _d, n, a in sorted(pairs):
                 if n not in placed_at and a in free:
@@ -1242,8 +1269,11 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
         for key in mine_by_shape:
             by_len.setdefault(len(key[0]), []).append(key)
         theirs_count = dict.fromkeys(mine_by_shape, 0)
+        # The short functions in a target's `compiler_output` ranges are
+        # what ours of the same shape compiled to: they count against our
+        # surplus as the image's own code does (their rows stay `crt`).
         for a in starts:
-            if not in_app(tgt, a):
+            if not (in_app(tgt, a) or _in(co_ranges, a)):
                 continue
             off = a - tva
             body = text[off:off + sizes.get(a, 0)]
