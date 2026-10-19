@@ -17,6 +17,9 @@ of Sierra's English 1.3 update, nolf2-update_1x3.exe:
   linux-install.sh       bash, coreutils and python3 (its zlib inflates)
   windows-install.bat    cmd running the PowerShell it carries (5.1, as every
                          Windows 10 and 11 has; .NET's DeflateStream inflates)
+  mac-install.command    the Perl every Mac has, with its own modules (its
+                         Compress::Raw::Zlib inflates), for CrossOver or
+                         another Wine; written if the project has one
 
 Nothing is installed or run from the discs or the update, and neither
 script reads ISO 9660 or an InstallShield header. An image is recognised by
@@ -65,10 +68,13 @@ A file's flag is `-`, or `once` for autoexec.cfg and Profiles/Default.prf
 (the shipped settings, which the game rewrites: written only if there are
 none). So the result is the game directory as built, byte for byte. The
 list goes at the end of each script, after a marker line; the scripts' code
-is build/game-scripts/linux-install.sh and windows-install.ps1 (the .bat's
-header is written here).
+is build/game-scripts/linux-install.sh, windows-install.ps1 (the .bat's
+header is written here) and, where the project has it, mac-install.command
+(Perl, which must end with its __END__ line: the marker and the list follow
+it, so the script reads them from its DATA handle).
 
 Writes <outdir>/linux-install.sh, <outdir>/windows-install.bat,
+<outdir>/mac-install.command (if build/game-scripts/ has one),
 <outdir>/disc-files.txt, the game directory's paths the scripts write (the
 archive leaves them out), and <outdir>/disc-sums.txt, the SHA-256 of each of
 those but the `once` files, which the game rewrites (build/package.sh puts
@@ -581,6 +587,15 @@ def main():
     with open(os.path.join(outdir, "linux-install.sh"), "w", newline="\n") as f:
         f.write(body + MARKER + "\n" + "\n".join(data) + "\n")
     os.chmod(os.path.join(outdir, "linux-install.sh"), 0o755)
+
+    mac = os.path.join(SCRIPTS, "mac-install.command")
+    if os.path.isfile(mac):
+        perl = open(mac).read()
+        if not perl.endswith("\n__END__\n"):
+            sys.exit("mkinstall: mac-install.command must end with __END__ (the list follows it)")
+        with open(os.path.join(outdir, "mac-install.command"), "w", newline="\n") as f:
+            f.write(perl + MARKER + "\n" + "\n".join(data) + "\n")
+        os.chmod(os.path.join(outdir, "mac-install.command"), 0o755)
 
     ps = open(os.path.join(SCRIPTS, "windows-install.ps1")).read()
     psm = f"#__{TAG}_PS__"
