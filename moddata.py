@@ -61,10 +61,16 @@ LIST = "MODERN-DATA.txt"
 
 
 def rez_stack(gamedir):
-    """The game's .rez archives in load order, from nolfcmds.txt."""
-    cmds = open(os.path.join(gamedir, "nolfcmds.txt"), errors="replace").read()
+    """The game's .rez archives in load order, from nolfcmds.txt (or, in a
+    native data import, archives.txt: one archive per line)."""
+    native = os.path.join(gamedir, "archives.txt")
+    if not os.path.isfile(os.path.join(gamedir, "nolfcmds.txt")) and os.path.isfile(native):
+        names = [line.strip() for line in open(native, errors="replace") if line.strip()]
+    else:
+        cmds = open(os.path.join(gamedir, "nolfcmds.txt"), errors="replace").read()
+        names = re.findall(r"-rez\s+(\S+)", cmds)
     stack = []
-    for name in re.findall(r"-rez\s+(\S+)", cmds):
+    for name in names:
         p = os.path.join(gamedir, name)
         if name.lower().endswith(".rez") and os.path.isfile(p):
             stack.append(p)
@@ -234,6 +240,11 @@ def cmd_apply(gamedir, rdir):
     custom = os.path.join(gamedir, "custom")
     written = []
     for target, path, kind, recipe in recipes(rdir):
+        if os.path.islink(recipe) and not os.path.exists(recipe):
+            # A file another checkout provides (a git submodule not cloned).
+            print(f"   skipped {path}: {os.path.relpath(recipe)} points outside this checkout "
+                  f"({os.readlink(recipe)}); run git submodule update --init to include it")
+            continue
         if kind == "file":
             content, real = open(recipe, "rb").read(), path
             if target == "gamedir":
