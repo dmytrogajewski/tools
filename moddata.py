@@ -25,6 +25,10 @@ applies it to the data the build already took from the retail game:
                                  the DXT1 blocks are reordered and each
                                  block's rows reversed, so nothing is
                                  re-encoded (the file's text is a comment)
+  src/modern/data/<path>.objects.json
+                               exact class/name/property edits or removals
+                                 in a version-66 world object section;
+                                 geometry is preserved and render data relocated
   src/modern/data/gamedir/...    the same kinds, for files the engine
                                  reads from the game directory itself rather
                                  than from the rez archives (defctrls.cfg):
@@ -199,6 +203,79 @@ def flop_dtx(raw, name):
     return bytes(out)
 
 
+def edit_world_objects(raw, edits, name):
+    """Edit version-66 authored objects, preserving geometry and render data.
+
+    Match class/name and expected string values exactly, just as .patch and
+    .bytes recipes reject a retail file that has drifted. Rebuild only the
+    object records and relocate the following render section.
+    """
+    import struct
+    header = list(struct.unpack_from("<11I", raw))
+    if header[0] != 66 or any(header[3:]) or not 44 <= header[1] <= header[2] <= len(raw):
+        raise ValueError(f"{name}: unsupported world sections")
+    pos = header[1]
+    def take(fmt):
+        nonlocal pos
+        value = struct.unpack_from(fmt, raw, pos)[0]
+        pos += struct.calcsize(fmt)
+        return value
+    def text():
+        nonlocal pos
+        length = take("<H")
+        value = raw[pos:pos + length].decode("latin-1")
+        pos += length
+        return value
+    count = take("<I")
+    records, matches = [], [0] * len(edits)
+    for _ in range(count):
+        length = take("<H")
+        start, end = pos, pos + length
+        cls, properties = text(), {}
+        for _ in range(take("<I")):
+            key, kind = text(), take("<B")
+            take("<I")  # authored property flags
+            at = pos
+            size = take("<H")
+            properties[key] = (at, kind, raw[pos:pos + size])
+            pos += size
+        if pos != end or end > header[2]:
+            raise ValueError(f"{name}: invalid world object extent")
+        def value(key):
+            _, kind, payload = properties[key]
+            if kind != 0 or len(payload) < 2 or struct.unpack_from("<H", payload)[0] != len(payload) - 2:
+                raise ValueError(f"{name}: {key} is not a string property")
+            return payload[2:].decode("latin-1")
+        replacements, removed = [], False
+        for i, edit in enumerate(edits):
+            if edit["class"] != cls or "Name" not in properties or edit["name"] != value("Name"):
+                continue
+            matches[i] += 1
+            if edit.get("remove"):
+                removed = True
+                continue
+            key = edit["property"]
+            if value(key) != edit["old"]:
+                raise ValueError(f"{name}: {edit['name']}.{key} differs from recipe")
+            data = edit["new"].encode("latin-1")
+            if b"\0" in data or len(data) > 65533:
+                raise ValueError(f"{name}: invalid replacement string")
+            at, _, old = properties[key]
+            replacements.append((at - start, 2 + len(old), struct.pack("<HH", len(data) + 2, len(data)) + data))
+        record = raw[start:end]
+        for at, size, data in sorted(replacements, reverse=True):
+            record = record[:at] + data + record[at + size:]
+        if not removed:
+            records.append(struct.pack("<H", len(record)) + record)
+    if any(n != 1 for n in matches):
+        raise ValueError(f"{name}: each world edit must match exactly one object: {matches}")
+    section = struct.pack("<I", len(records)) + b"".join(records)
+    out = bytearray(raw[:header[1]] + section + raw[pos:])
+    header[2] += len(section) - (pos - header[1])
+    struct.pack_into("<11I", out, 0, *header)
+    return bytes(out)
+
+
 def recipes(rdir):
     """(target, game path, kind, recipe file) for every recipe; target is
     "custom" or "gamedir"."""
@@ -220,6 +297,8 @@ def recipes(rdir):
                 out.append((target, rel[:-len(".bytes")], "bytes", p))
             elif f.endswith(".flop"):
                 out.append((target, rel[:-len(".flop")], "flop", p))
+            elif f.endswith(".objects.json"):
+                out.append((target, rel[:-len(".objects.json")], "objects", p))
     return sorted(out)
 
 
@@ -270,6 +349,9 @@ def cmd_apply(gamedir, rdir):
                 content = apply_bytes(raw, recipe, path)
             elif kind == "flop":
                 content = flop_dtx(raw, path)
+            elif kind == "objects":
+                import json
+                content = edit_world_objects(raw, json.load(open(recipe)), path)
             else:
                 text = raw.decode("latin-1")
                 content = apply_patch(text, open(recipe, encoding="latin-1").read(),
