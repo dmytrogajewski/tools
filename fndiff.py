@@ -5,7 +5,7 @@ Compares a shipped function against our compiled object and reports, in
 order of severity: byte identity (relocations masked), the mnemonic diff,
 the best register-renaming of ours (to separate allocation lottery from
 structure), and pattern hints matched against the codegen fingerprints this
-project has already proven (guides/09-codegen-patterns.md).
+project has already proven (guides/09_codegen_patterns.md).
 
 Usage:
   fndiff.py <ship-addr> <obj> <symbol-substr> [--image=<target or image>]
@@ -338,7 +338,7 @@ def main():
     O = [x for _, _, oo in blocks for x in oo]
     hints = [h for cond, h in HINTS if cond(S, O)]
     if hints:
-        print("\nhints (proven fingerprints, see guides/09-codegen-patterns.md):")
+        print("\nhints (proven fingerprints, see guides/09_codegen_patterns.md):")
         for h in hints:
             print("  *", h)
     if ship_len == ours_len and abs(len(ship) - len(ours)) <= 2 and len(blocks) <= 3:

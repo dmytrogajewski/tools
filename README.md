@@ -45,7 +45,7 @@ The guides in `guides/` explain the method these tools serve, and
 
 ## The loop
 
-Reconstructing one function of `server.dll` (see `guides/02-the-loop.md`):
+Reconstructing one function of `server.dll` (see `guides/02_the_loop.md`):
 
 ```sh
 build/reference.sh                       # once: the retail images and their tables
@@ -76,7 +76,7 @@ compiled again without the client, renderer and UI
 both objects (`server-one x.cpp` and `Lithtech-one x.cpp`). A function that
 matches in `server.dll` but only nears in `Lithtech.exe` has source that is
 already proven right: the difference is the compile (see `o2gap.py` and
-`guides/12-o2-shape.md`), and editing the source to chase the exe will
+`guides/12_o2_shape.md`), and editing the source to chase the exe will
 regress the dll.
 
 **`Lithtech.exe` is SecuROM-wrapped.** Its `.text` 0x565000..0x56a000 is
@@ -85,7 +85,7 @@ encrypted on disc, and all 1,514 of its `call dword ptr [IAT]` sites read
 the import it really calls, from the unprotected engine of the 1.3
 multiplayer demo, and writes a readable copy of the image for the
 disassembling tools. The demo is evidence for code and data only, never for
-addresses (`guides/05-exe-and-engine.md`).
+addresses (`guides/05_exe_and_engine.md`).
 
 ## Per-target facts
 
@@ -98,7 +98,7 @@ addresses (`guides/05-exe-and-engine.md`).
 | Tool | What it does |
 |---|---|
 | `macho.py` | Reader for the Mac NOLF2 engine (`NOLF2.app/Contents/MacOS/NOLF2`, Mach-O PowerPC, not stripped) and the Mac dedicated server's `server.dll` bundle: `info`, `syms`, `funcs [regex]` (extents, demangled), `paths` (Monolith's source paths in the strings and the functions that use them), `refs <addr>`, `demangle`. Its Itanium demangler prints every name in both binaries as `c++filt` does. The counterpart of nolfsrc's `pef.py`. The release is not installed by default: `rez/fetch-isos.sh nolf2-mac-usa && rez/install-games.sh nolf2-mac-usa` (or `--root`/`$NOLF2_MAC`). |
-| `macinventory.py` | The inventory built on `macho.py`: every Mac engine and server function with its demangled name, size and the Jupiter source file it belongs to, with its category (engine, omni, stl, runtime, unknown) and the evidence (`defn`: the file that defines the name, `path`, `neighbour`), written to `progress/engine/mac-functions.csv`, `mac-server-functions.csv` and the per-file and per-module summary `mac-modules.md`. `macinventory.py --jupiter ../fear/Dev/Source` regenerates them byte for byte. |
+| `macinventory.py` | The inventory built on `macho.py`: every Mac engine and server function with its demangled name, size and the Jupiter source file it belongs to, with its category (engine, omni, stl, runtime, unknown) and the evidence (`defn`: the file that defines the name, `path`, `neighbour`), written to `progress/engine/mac-functions.csv`, `mac-server-functions.csv` and the per-file and per-module summary `mac_modules.md`. `macinventory.py --jupiter ../fear/Dev/Source` regenerates them byte for byte. |
 | `demoimports.py` | An unprotected demo engine as the key to retail `Lithtech.exe`'s SecuROM changes, per game (`PROFILES`, picked by the retail engine's sha256 or `--game=nolf2|cjack`; NOLF2 by default): NOLF2's 1.3 multiplayer demo (one dispatcher slot, `out/mpdemo/`), Contract J.A.C.K.'s single-player demo (35 slots in `.obfzv`, `out/spdemo/`). `extract` unpacks the demo's engine (from `rez/artifacts/demos/` or `rez/demos/`), `map` writes `progress/engine/Lithtech-iat-calls.csv` (each redirected `call [IAT]` site of retail and the import it calls), `plain` writes `out/<demo>/Lithtech-readable.exe`, retail with the encrypted pages filled from the demo and the redirected calls restored, for reading only (data addresses inside the filled pages stay the demo's). Only the map is committed; the demo's code never is. |
 
 ## Building and running the game
@@ -176,7 +176,7 @@ match means identical up to addresses.
 
 | Tool | What it does |
 |---|---|
-| `fndiff.py` | The main diff: byte identity if the sizes agree, otherwise the mnemonic diff, the best renaming of callee-saved registers, and hints from the fingerprints `guides/09-codegen-patterns.md` catalogues. `fndiff.py <ship-addr> <obj> <symbol> [--image=<target>]`; without `--image` the target is the one whose link read the object. |
+| `fndiff.py` | The main diff: byte identity if the sizes agree, otherwise the mnemonic diff, the best renaming of callee-saved registers, and hints from the fingerprints `guides/09_codegen_patterns.md` catalogues. `fndiff.py <ship-addr> <obj> <symbol> [--image=<target>]`; without `--image` the target is the one whose link read the object. |
 | `nearpos.py` | Slides each unmatched function of an object over `.text` and reports where the fewest unmasked bytes differ. Reach for it first. |
 | `layoutscan.py` | Finds nears whose every difference is a field displacement shifted by one constant: a struct layout error. `--image=<target>`. |
 | `nearscan.py` | Runs `fndiff` over a whole near list and classifies each. `nearscan.py <target>`. |

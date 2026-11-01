@@ -7,12 +7,12 @@ writes, deterministically (the same inputs give the same bytes):
 
   mac-functions.csv         the engine (NOLF2.app/Contents/MacOS/NOLF2)
   mac-server-functions.csv  the dedicated server's engine (NOLF2Srv.app's server.dll)
-  mac-modules.md            per module and per file: functions and bytes; the
+  mac_modules.md            per module and per file: functions and bytes; the
                             Jupiter files the Mac engine has nothing of; the
                             Mac classes the Jupiter tree has no file for
 
 <Dev/Source> is the F.E.A.R. source tree's Dev/Source (its `runtime/` is
-LithTech Jupiter, NOLF2's engine line: docs/engine/fear-mapping.md). The Mac
+LithTech Jupiter, NOLF2's engine line: docs/engine/fear_mapping.md). The Mac
 release comes from `rez/fetch-isos.sh nolf2-mac-usa && rez/install-games.sh
 nolf2-mac-usa`; --root defaults to rez/games/nolf2-mac-usa.
 
@@ -579,7 +579,7 @@ def main():
         _, rows = inventory(macho.resolve(which, a.root), index, jfiles)
         write_csv(rows, os.path.join(a.out, name))
         sets.append((label, rows))
-    with open(os.path.join(a.out, "mac-modules.md"), "w") as f:
+    with open(os.path.join(a.out, "mac_modules.md"), "w") as f:
         f.write(summary(sets, jfiles))
 
 

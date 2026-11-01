@@ -112,7 +112,7 @@ old object first; do the same when compiling by hand.
   paths put first. Watch for local `.h` shadows that quote-include and
   override them.
 - **Same source constructs** -- everything else is
-  [03-reading-disassembly](03-reading-disassembly.md).
+  [03-reading-disassembly](03_reading_disassembly.md).
 
 ## Which toolchain built a given retail binary
 

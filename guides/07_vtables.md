@@ -1,6 +1,6 @@
 # 07 · Naming anonymous functions from vtables
 
-The check-literal trick ([06](06-worked-example-engine.md)) names a function
+The check-literal trick ([06](06_worked_example_engine.md)) names a function
 only if it validates its arguments. Most functions don't, so most of a
 stripped engine binary stays `sub_1000xxxx`. This guide is the second naming
 source, and it is bigger than the first: **a vtable is a class's method list
@@ -39,11 +39,11 @@ checks or not.
    reliable way to split a run.
 
 4. **Reconstruct the newly named slots as usual**
-   ([03](03-reading-disassembly.md)): they are ordinary functions that now
+   ([03](03_reading_disassembly.md)): they are ordinary functions that now
    have a signature — the SDK gives parameter types, return type, and often
    a doc comment.
 
-Remember the era caveat from [05](05-exe-and-engine.md): the SDK headers are
+Remember the era caveat from [05](05_exe_and_engine.md): the SDK headers are
 NOLF2-era, and vtable order is the thing that drifted. Check each slot's
 argument count against its `ret N` before trusting a long stretch of header
 order.

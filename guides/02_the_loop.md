@@ -42,7 +42,7 @@ checks byte identity with relocations masked, shows the mnemonic diff, then
 retries it under every renaming of `ebx`/`esi`/`edi` (separating
 register-allocation noise from structural differences), and prints hints
 matched against the codegen fingerprints catalogued in
-[09-codegen-patterns](09-codegen-patterns.md). Its byte-level view also
+[09-codegen-patterns](09_codegen_patterns.md). Its byte-level view also
 catches what opcode-masked diffs cannot: two same-shaped instructions with
 *swapped field offsets* look identical once immediates are masked -- that
 exact blind spot hid a crossed pair of struct fields in `CNetMgr::Update`.
@@ -100,7 +100,7 @@ directory.
 
 2. **Write the C++** in `src/lithshared/<lib>/`.
 
-3. **Compile** just that file (see [01-environment](01-environment.md)), or
+3. **Compile** just that file (see [01-environment](01_environment.md)), or
    the whole library with `build/libs.sh <lib>`.
 
 4. **Diff**, the whole library:
@@ -147,7 +147,7 @@ is almost always a vector operator's return temporary you wrote out by hand.
 ## When to stop at "near"
 
 Leave a function `near` only when the normalised diff is empty or reduces to
-one of the [known near classes](09-codegen-patterns.md#known-near-classes) --
+one of the [known near classes](09_codegen_patterns.md#known-near-classes) --
 tail merge, cross-jump host, shared-exit host, callee-saved rotation,
 shrink-wrapping, FPU stack bookkeeping or term ordering. Note which class, in
 a comment next to the function.
@@ -158,7 +158,7 @@ match: rebuild under the other compiler revisions we hold
 `msvc-6.00-9782` default), and confirm every call in the function pushes exactly
 what the retail call pushes. Anything else is a real difference -- keep
 going, and add what you learn to
-[09-codegen-patterns](09-codegen-patterns.md).
+[09-codegen-patterns](09_codegen_patterns.md).
 
 ## Ghidra as a reading aid (optional)
 

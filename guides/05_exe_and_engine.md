@@ -64,7 +64,7 @@ run it on a host that does.)
    it references (grep the `exedump` output). Those references tell you what
    each function is and which ones group into a source file — and in the
    engine binaries, embedded `Class::Method` strings name many outright
-   (`tools/tagmap.py`; see [06](06-worked-example-engine.md)).
+   (`tools/tagmap.py`; see [06](06_worked_example_engine.md)).
 
 2. **Seed from era source where it exists.** Monolith reused code across
    titles. `NOLF.exe`'s DIB/palette code is `libs/dibmgr` in the NOLF2 source
@@ -76,7 +76,7 @@ run it on a host that does.)
 
 3. **Disassemble-and-match the rest.** Everything with no era source is read
    straight from `exedump` output using
-   [03-reading-disassembly](03-reading-disassembly.md).
+   [03-reading-disassembly](03_reading_disassembly.md).
 
 4. **Resources are separate.** An exe or dll also carries dialogs, strings,
    bitmaps, icons. Reconstruct them as an `.rc` and verify with `rsrcdiff`
@@ -92,7 +92,7 @@ run it on a host that does.)
 ## Compiling and verifying
 
 **`server.dll` is built `/O1` (minimize size), not `/O2`** — proven by
-byte-matching it; [06-worked-example-engine](06-worked-example-engine.md)
+byte-matching it; [06-worked-example-engine](06_worked_example_engine.md)
 shows how that was found and what the tells look like. The other targets have
 their own compilers and flags (lithtech.exe cl 8447 `/O2`, d3d.ren Intel
 C/C++ 4.0 with per-file flag groups); `build/build.mk` lists

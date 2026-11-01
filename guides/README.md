@@ -30,16 +30,16 @@ You are done with a function when the tools report it **identical** (machine
 code equal, relocation targets masked). A **near** match --
 instruction-equivalent but a few bytes off -- is acceptable only when the
 remaining difference belongs to one of the
-[known near classes](09-codegen-patterns.md#known-near-classes); document it
+[known near classes](09_codegen_patterns.md#known-near-classes); document it
 in a comment beside the function and move on. Coming back to close one later
 is its own job, with its own method -- see
-[10-upgrading-nears](10-upgrading-nears.md).
+[10-upgrading-nears](10_upgrading_nears.md).
 
 There is a **third standard**, for one specific kind of work: a function of
 several kilobytes, where byte identity is out of reach but the decode is the
 valuable part. Those are reconstructed to be *structurally* right and proved
 with the call-sequence check rather than the byte oracle -- see
-[11-large-functions](11-large-functions.md). It relaxes codegen exactness and
+[11-large-functions](11_large_functions.md). It relaxes codegen exactness and
 nothing else: guessing is still forbidden, and an undecoded region is still
 declared rather than filled in.
 
@@ -51,50 +51,50 @@ which compiler revision built which binary.
 
 ## Start here
 
-1. **[01-environment](01-environment.md)** -- the compilers under Wine in the
+1. **[01-environment](01_environment.md)** -- the compilers under Wine in the
    build container, and how to compile one file at a time.
-2. **[02-the-loop](02-the-loop.md)** -- the verification tools (objdiff,
+2. **[02-the-loop](02_the_loop.md)** -- the verification tools (objdiff,
    dumpfn, exedump, exematch, fndiff, bindiff, rsrcdiff) and how to drive the
    compile-diff cycle.
-3. **[03-reading-disassembly](03-reading-disassembly.md)** -- the reference:
+3. **[03-reading-disassembly](03_reading_disassembly.md)** -- the reference:
    how VC6 codegen idioms map back to C++ source constructs. The heart of the
    work.
-4. **[04-worked-example](04-worked-example.md)** -- one **library** function
+4. **[04-worked-example](04_worked_example.md)** -- one **library** function
    start to finish, every command shown (symbols available).
-5. **[05-exe-and-engine](05-exe-and-engine.md)** -- the harder case: binaries
+5. **[05-exe-and-engine](05_exe_and_engine.md)** -- the harder case: binaries
    with no symbols and no relocations (the engine `.exe`/`.dll`/`.ren`
    targets).
-6. **[06-worked-example-engine](06-worked-example-engine.md)** -- one
+6. **[06-worked-example-engine](06_worked_example_engine.md)** -- one
    **engine** function start to finish: naming it from embedded strings,
    modelling the internal error macro and vtables, discovering the `/O1`
    build, and cashing in the rest of its cluster.
-7. **[07-vtables](07-vtables.md)** -- naming *anonymous* functions: find the
+7. **[07-vtables](07_vtables.md)** -- naming *anonymous* functions: find the
    class's vtable in `.rdata` (`tools/vtabmap.py`), anchor it against the SDK
    header's declaration order, and read the unknown slots' names and
    signatures straight out of the header.
-8. **[08-worked-example-playsound](08-worked-example-playsound.md)** --
+8. **[08-worked-example-playsound](08_worked_example_playsound.md)** --
    chasing a 494-byte function to byte identity: second-base `this`
    adjustment, dead-parameter-slot locals, the mnemonic diff, and reading
    register allocation and block layout back into source shape.
-9. **[09-codegen-patterns](09-codegen-patterns.md)** -- the case law: every
+9. **[09-codegen-patterns](09_codegen_patterns.md)** -- the case law: every
    proven asm-to-source fingerprint, organised by what you see in the
    disassembly, plus the near classes not worth chasing and the per-binary
    compiler map. Read it before writing a function and again when one is
    stuck a few bytes off.
-10. **[10-upgrading-nears](10-upgrading-nears.md)** -- taking a function that
+10. **[10-upgrading-nears](10_upgrading_nears.md)** -- taking a function that
     is *nearly* right and closing the gap: triaging the worklist, telling a
     real source fix from a missing function from an irreducible one, the
     fixes in the order they pay, and how to write a near up so nobody repeats
     it.
-11. **[11-large-functions](11-large-functions.md)** -- the third standard:
+11. **[11-large-functions](11_large_functions.md)** -- the third standard:
     reconstructing a function of several kilobytes to be *structurally* right
     and proving it with the call-sequence check (`tools/callseq.py`).
-12. **[12-o2-shape](12-o2-shape.md)** -- functions already byte-identical in
+12. **[12-o2-shape](12_o2_shape.md)** -- functions already byte-identical in
     `server.dll` (`/O1`) but not in `lithtech.exe` (`/O2`): the source is
     proven, only its `/O2` shape is wrong (`tools/o2gap.py`).
-13. **[13-cluster-recon](13-cluster-recon.md)** -- the procedure for
+13. **[13-cluster-recon](13_cluster_recon.md)** -- the procedure for
     reconstructing a whole untouched cluster of functions from scratch.
-14. **[14-progress](14-progress.md)** -- the scoreboard: building and using
+14. **[14-progress](14_progress.md)** -- the scoreboard: building and using
     `progress/`, checking a change with `make progress`, recording it with
     `make progress-update`, reading the worklists, correcting the
     enumeration, and adapting the scorer to another project.
