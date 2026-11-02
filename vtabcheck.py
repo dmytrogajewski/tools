@@ -766,6 +766,7 @@ def main():
                 k, kind, ("0x%08x %s" % (ot, ",".join(a2s.get(ot, [])[:2]))) if ot else "-",
                 st, " ".join(names[:3]) or "(none)"))
     print("tables with problems:", bad_tabs)
+    nbad = 0
 
     if opts.get("--calls"):
         # The link-level wiring check: for every function progress.py places
@@ -822,7 +823,11 @@ def main():
         print("spec: %d tables, %d MISSING slots -> %s" % (
             sum(1 for l in spec if l.startswith("vtable")),
             sum(1 for l in spec if "MISSING" in l), opts["--spec"]))
+    # a problem is a failure: a caller can gate on the status (but see the
+    # README: a table reported is not yet a confirmed broken table for
+    # every compiler's output)
+    return 1 if bad_tabs or nbad else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

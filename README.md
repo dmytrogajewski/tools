@@ -6,8 +6,10 @@ bytes that shipped: matching, diffing, enumerating, scoring. They grew up in
 reconstruction, were made target-driven in nolf2src (*No One Lives Forever
 2*), and are carried by both and by cjacksrc (*Contract J.A.C.K.*) as their
 `tools/`. The examples below still name NOLF2's binaries and paths; the
-project's own `progress/targets.py` is what a tool reads. nolfsrc pins a
-commit from before the target-driven tools came in.
+project's own `progress/targets.py` is what a tool reads. The three game
+projects pin the same commit of these tools: a change to how they score is
+made here, run against all three, and taken up by all three together, so
+that one standard of proof holds for every game.
 
 Everything here serves one of two jobs: building and running the game, or
 proving, function by function, that the C++ in `src/` recompiles to exactly
@@ -114,7 +116,7 @@ addresses (`guides/05_exe_and_engine.md`).
 | `mkdeps.py` | `build/build.mk` | Header dependencies, which VC6 cannot report: follows every `#include` the way MSVC resolves it and writes the Makefile rules; for a resource script also its `rcinclude`s, the files its resources name, and the files of its directory and its `/i` ones. |
 | `mkimplib.py` | by hand | Writes a COFF import library for a few named imports. |
 | `mkaliasobj.py`, `mkvtabobj.py`, `mkviewobj.py` | by hand | nolfsrc's link stand-ins: an object of weak externals (one function reached under two names), full-length vtables for classes the source only partly declares, a laid-out view of a binary's globals. Fallbacks only: with the Jupiter tree's real class declarations they should be unnecessary. Their docstrings' paths are NOLF1's examples. |
-| `buildcmp.py` | by hand | Compares two directories of build outputs byte for byte, ignoring the time stamps VC6's tools write. |
+| `buildcmp.py` | by hand | Compares two directories of build outputs byte for byte, ignoring the time stamps VC6's tools write. A PE image is known by its `MZ` header, whatever its suffix (`.fxd`, `.dle`, `.mll` ...). |
 | `loadtest.c` | `build/engine.sh server test` | A Win32 program run under Wine: occupies `server.dll`'s preferred base so the loader relocates it, loads it, and calls `CreateServer` / `DeleteServer`. |
 | `srvtest.sh` | by hand | The dedicated server's runtime test: NOLF2Srv.exe of a game directory, with a given `server.dll` (default ours; `out/reference/server.dll` is the control), hosts the first co-op level under Xvfb in the build container; ALIVE / EXITED, message boxes reported. `srvtest.sh [server.dll] [seconds] [gamedir]`. |
 | `mptest.sh` | by hand | The multiplayer runtime test: NOLF2Srv.exe with a given `server.dll` (default ours; `out/reference/server.dll` is the protocol's control) hosts the first co-op level, and a `Lithtech.exe` (default ours) joins it over UDP through the LAN menus (driven with xdotool: the LAN query, the connection, the game's handshake), under one Xvfb screen in the build container; JOINED / KICKED / NOJOIN / EXITED, from both consoles (`+errorlog`, `UDPDebug 1`). `mptest.sh [server.dll] [Lithtech.exe] [seconds] [gamedir]`. |
@@ -132,8 +134,9 @@ SDK first), with their own Wine prefix (`out/tools-wine`).
 
 | Tool | What it does |
 |---|---|
-| `progress.py` | The scoreboard: enumerates every function of each retail binary `progress/targets.py` lists and classifies each against our build (`identical`, `near`, `small`, `attempted`, `todo`; `crt`, `middleware` and `encrypted` are listed, not counted). `--nears[=<target>]`, `--todo`, `--attempted`, `--small`, `--unplaced` list rows. See `progress/README.md`. |
-| `ratchet.py` | Holds a scoring run to the baseline in `progress/`: `check`, `update`, `readme`. `make progress` runs both tools. |
+| `progress.py` | The scoreboard: enumerates every function of each retail binary `progress/targets.py` lists and classifies each against our build (`identical`, `near`, `small`, `attempted`, `todo`; `crt`, `middleware` and `encrypted` are listed, not counted). The region decides first: a match outside `app` stays `crt` (only a target's `compiler_output` ranges count, where one of ours is placed: our own compiler-made funclets, initializers and terminators). Matches never overlap, so no byte is counted twice (the better-evidenced of two overlapping matches is kept), and a scoring driver's own initializers (`DRIVER_OBJS`) are never placed. `--nears[=<target>]`, `--todo`, `--attempted`, `--small`, `--unplaced` list rows. See `progress/README.md`. |
+| `ratchet.py` | Holds a scoring run to the baseline in `progress/`: `check`, `update`, `readme`. `make progress` runs both tools. `check --complete` implies `--covered`. |
+| `datacheck.py` | The text in each image's data (strings, import and export names) against the retail image's, as multisets: fails on a difference `progress/data-known.txt` does not list with its reason. The images are `progress/targets.py`'s. `baseline [--image=<image>] <reason>` records what differs now, for a project taking the check up. `make progress` runs it. |
 | `libscan.py` | Where each library's code sits in a retail image: every function of the given `.lib`s found at exactly one address, grouped into runs. How `targets.py`'s boundaries (the C runtime, D3DX, WONAPI) were found. |
 | `decoded.py` | Bytes under *structural* reconstruction: an object `big<addr>.obj` among a target's link inputs holding a function with the shipped control flow and calls but not yet byte-exact, scored by `callseq.py`. Never added to `progress.py`'s figure. |
 | `decodedlt.py` | The same for a target whose reconstructions are ordinary named functions, placed by `progress/<stem>-decoded-map.csv`. `decodedlt.py <target>`. |
@@ -168,9 +171,10 @@ match means identical up to addresses.
 | `bindiff.py` | Compares two whole linked PE images with addresses masked, matching functions across them whatever the link order. |
 | `rsrcdiff.py` | Compares two images' resources payload by payload. |
 | `callcheck.py` | Checks that our calls go where the shipped calls go (a masked comparison sees a `call` as one opcode and four holes). |
-| `fpconst.py` | Checks the floating-point constants a function loads through relocations. |
+| `fpconst.py` | Checks the floating-point constants a function loads through relocations: each relocation is judged by the instruction that owns it (`x86len.py`, decoding from the function's entry), and only an x87 read of a float or double counts. `fpconst.py <image> <obj\|dir>...`, or `--targets` for every built image target, which `make progress` runs: a mismatch fails it. |
+| `x86len.py` | A small 32-bit x86 decoder: each instruction's length and where its displacement and immediate are, for the checkers that must know which instruction a relocated field belongs to. |
 | `linkresolve.py` | After a whole-image link, maps each unresolved symbol onto the definition it really means and writes alias lines. |
-| `vtabcheck.py` | Compares our linked image's vtables with the shipped ones slot by slot. `vtabcheck.py <target>`; `_purecall` is found as the image's `jmp [IAT]` thunk, or from `targets.py`'s `purecall`. |
+| `vtabcheck.py` | Compares our linked image's vtables with the shipped ones slot by slot. `vtabcheck.py <target>`; `_purecall` is found as the image's `jmp [IAT]` thunk, or from `targets.py`'s `purecall`. Exits 1 on a problem. Not yet a gate: on VC7.1 output (cjacksrc) it reports tables that are not broken, and shipped addresses that cannot be, so its report needs reading. |
 
 ## Diagnosing a function that does not match
 

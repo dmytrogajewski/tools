@@ -15,7 +15,10 @@ progress/ -- the list of every function already byte-identical
       with a reminder to record them. --covered also fails unless every
       target has no unwritten and no unplaced function (full coverage:
       everything written and placed, near or identical); --complete
-      unless every scored function is identical: the finish line.
+      unless every scored function is identical as well (it implies
+      --covered: an identical score with written functions still unplaced
+      is not the finish line). Neither is whole-image identity: that is
+      tools/buildcmp.py's, against the retail image.
   ratchet.py update [--accept-losses]
       Records the run as the new baseline and rewrites README.md's table.
       Refuses a run that lost a recorded function unless --accept-losses
@@ -307,7 +310,8 @@ def main():
     args = sys.argv[1:]
     cmd = args[0] if args else ""
     if cmd == "check":
-        sys.exit(cmd_check("--complete" in args, "--covered" in args))
+        sys.exit(cmd_check("--complete" in args,
+                           "--covered" in args or "--complete" in args))
     if cmd == "update":
         sys.exit(cmd_update("--accept-losses" in args))
     if cmd == "readme":

@@ -141,7 +141,9 @@ def normalised(path):
         norm_coff_obj(buf)
     elif ext == ".lib":
         norm_lib(buf)
-    elif ext in (".exe", ".dll", ".ren", ".lto"):
+    elif buf[:2] == b"MZ":
+        # a PE whatever its suffix (.exe .dll .ren .lto .fxd .dle .bmi .mll
+        # ...): its format is in its content, not its name
         norm_pe(buf)
     elif ext == ".map":
         return MAP_TIMESTAMP.sub(b"", bytes(buf))

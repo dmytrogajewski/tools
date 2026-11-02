@@ -18,6 +18,9 @@ be printable by chance (the "5?" of a float before "Error: ..."): such a
 run is cut back to its first 4-byte-aligned character, where the compiler
 puts a literal.
 
+The images are progress/targets.py's: every target with a `shipped` image
+and a build of ours, once per image.
+
 Differences that are known and meant -- each with its reason -- are listed
 in progress/data-known.txt; anything else is NEW and fails `make progress`:
 
@@ -27,6 +30,12 @@ in progress/data-known.txt; anything else is NEW and fails `make progress`:
                          progress-update`); entries are only ever added by
                          hand, with their reason
   datacheck.py show [image]   list every difference, known or not
+  datacheck.py baseline [--image=<image>] <reason>
+                         append every NEW difference to progress/data-known.txt
+                         under `# <reason>`: a project taking the check up
+                         records what is there as UNREVIEWED, so that the
+                         check fails on anything added from then on while
+                         the list stays to be worked through
 
 progress/data-known.txt: `<image><TAB><retail|ours><TAB><string>`, the
 string written with Python's unicode_escape (so a backslash is doubled);
@@ -47,20 +56,27 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 KNOWN = "progress/data-known.txt"
 REFERENCE = "out/reference"
 
-# (label, retail image, ours): every image the build makes that has a retail
-# counterpart
-IMAGES = [
-    ("lithtech.exe", "lithtech.exe", "src/engine/lithtech/Release/lithtech.exe"),
-    ("server.dll",   "server.dll",   "src/engine/server/Release/server.dll"),
-    ("d3d.ren",      "d3d.ren",      "src/engine/d3d/Release/d3d.ren"),
-    ("NOLF.exe",     "NOLF.exe",     "src/engine/launcher/Release/NOLF.exe"),
-    ("NolfServ.exe", "NolfServ.exe", "src/engine/nolfserv/Release/NolfServ.exe"),
-    ("ltmsg.dll",    "ltmsg.dll",    "src/engine/ltmsg/Release/ltmsg.dll"),
-    ("sres.dll",     "sres.dll",     "src/engine/sres/Release/sres.dll"),
-    ("CShell.dll",   "CShell.dll",   "src/game/ClientShellDLL/Final_Release/CShell.dll"),
-    ("Object.lto",   "Object.lto",   "src/game/ObjectDLL/Final_Release/Object.lto"),
-    ("CRes.dll",     "CRes.dll",     "src/game/ClientRes/Release/CRes.dll"),
-]
+
+
+def images():
+    """[(label, retail image, ours)]: every image progress/targets.py names
+    that the build has made, once each (an image's `:rsrc` target shares
+    it), labelled by the retail file's name."""
+    import tgt as tgt_mod
+    out, seen = [], set()
+    for t in tgt_mod.cfg.TARGETS:
+        ref = t.get("shipped")
+        if not ref or ref in seen or not t.get("built"):
+            continue
+        ours = tgt_mod.built(t)
+        if not ours:
+            continue
+        seen.add(ref)
+        out.append((os.path.basename(ref), ref, ours))
+    return out
+
+
+IMAGES = []
 
 IMAGE_SCN_MEM_EXECUTE = 0x20000000
 RUN = re.compile(rb"[\x20-\x7e\t\r\n]{5,}(?=\x00)")
@@ -224,7 +240,7 @@ def differences(only=None):
     for label, ref, ours in IMAGES:
         if only and label != only:
             continue
-        rp, op = os.path.join(REPO, REFERENCE, ref), os.path.join(REPO, ours)
+        rp, op = os.path.join(REPO, ref), os.path.join(REPO, ours)
         if not os.path.exists(rp) or not os.path.exists(op):
             print("datacheck.py: %s: %s missing, not checked"
                   % (label, rp if not os.path.exists(rp) else op), file=sys.stderr)
@@ -308,12 +324,33 @@ def write_known(known, fixed):
 
 def main():
     os.chdir(REPO)
+    IMAGES[:] = images()
     args = sys.argv[1:]
     cmd = args[0] if args else "check"
     if cmd == "show":
         diff = differences(args[1] if len(args) > 1 else None)
         new, fixed = compare(diff, load_known())
         report(diff, new, fixed, verbose=True)
+        return 0
+    if cmd == "baseline":
+        only = None
+        if len(args) > 1 and args[1].startswith("--image="):
+            only = args.pop(1).split("=", 1)[1]
+        if len(args) < 2:
+            sys.exit(__doc__)
+        new, _fixed = compare(differences(only), load_known())
+        p = os.path.join(REPO, KNOWN)
+        head = "" if os.path.exists(p) else (
+            "## The text differences from the retail images that are known: "
+            "tools/datacheck.py.\n"
+            "## <image><TAB><retail|ours><TAB><string>; `# ...` is the reason "
+            "for the entries after it.\n")
+        with open(p, "a", encoding="ascii") as f:
+            f.write(head + "\n# " + " ".join(args[1:]) + "\n")
+            for (image, side, t), n in sorted(new.items()):
+                for _ in range(n):
+                    f.write(f"{image}\t{side}\t{esc(t)}\n")
+        print(f"datacheck.py: {sum(new.values())} difference(s) recorded in {KNOWN}")
         return 0
     if cmd not in ("check", "update"):
         sys.exit(__doc__)

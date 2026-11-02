@@ -665,6 +665,68 @@ def _restore_iat_calls(tgt, text, tva):
     return bytes(t)
 
 
+def _resolve_overlaps(label, matched, placed, start_set, funcs, all_hits,
+                      unpadded, find, text, tva):
+    """Drop the matches that intersect a better one (see _rows_for_image),
+    re-placing the dropped functions at a free hit where they have one."""
+    def rank(a):
+        n = PLACED_SYMS.get((label, a))
+        return (0 if n in placed else 1 if a in start_set else 2,
+                -matched[a], a)
+
+    # A shared tail first: two matches at function starts (or placed by
+    # name) where the second starts inside the first and runs past its end
+    # are both functions. VC7.1 lays a catch block's funclet out so that
+    # its `push 0; push 0; call _CxxThrowException` is also where the next
+    # funclet begins, and our object's label ends the first one past it.
+    # The first is counted up to where the second starts, not dropped.
+    good = sorted(a for a in matched if rank(a)[0] < 2)
+    for a, b in zip(good, good[1:]):
+        if a < b < a + matched[a] < b + matched[b]:
+            matched[a] = b - a
+
+    taken = []                  # sorted [(start, end)]
+
+    def clear(a, n):
+        i = bisect.bisect_right(taken, (a, 1 << 62))
+        if i and taken[i - 1][1] > a:
+            return False
+        return not (i < len(taken) and taken[i][0] < a + n)
+
+    dropped = []
+    debug = os.environ.get("PROGRESS_DEBUG_OVERLAPS")
+    for a in sorted(matched, key=rank):
+        if clear(a, matched[a]):
+            bisect.insort(taken, (a, a + matched[a]))
+        else:
+            if debug:
+                i = bisect.bisect_right(taken, (a, 1 << 62))
+                near = taken[max(0, i - 1):i + 1]
+                print(f"  {label}: drop 0x{a:x}+{matched[a]} "
+                      f"{PLACED_SYMS.get((label, a))} rank {rank(a)[:1]} for "
+                      + ", ".join(f"0x{x:x}-0x{y:x} {PLACED_SYMS.get((label, x))}"
+                                  for x, y in near), file=sys.stderr)
+            dropped.append((a, PLACED_SYMS.pop((label, a), None)))
+    for a, _n in dropped:
+        del matched[a]
+    for a, n in dropped:
+        if n is None or n not in funcs:
+            continue
+        code, mask = funcs[n]
+        hits = all_hits.get(n) or []
+        if n in unpadded and not list(find(text, tva, code, mask)):
+            code, mask = unpadded[n]
+        for h in sorted(hits, key=lambda h: (h not in start_set, h)):
+            if h not in matched and clear(h, len(code)):
+                matched[h] = len(code)
+                PLACED_SYMS[(label, h)] = n
+                bisect.insort(taken, (h, h + len(code)))
+                break
+    if dropped:
+        print(f"  {label}: {len(dropped)} match(es) dropped for overlapping "
+              f"a better one", file=sys.stderr)
+
+
 def _rows_for_image(tgt, objs, mapfile, linked_path):
     """A PE image under reconstruction (exe or dll, no symbols).
 
@@ -693,6 +755,18 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     img, starts, sizes = _enum_with_sizes(p, label)
 
     funcs, unpadded, from_lib, rkinds = _load_objs(objs, icl)
+
+    # A scoring driver (DRIVER_OBJS) exists in no shipped image: the inline
+    # and template functions it makes the compiler emit are real candidates,
+    # but its own per-object artifacts -- the `_$E` initializers and
+    # ??__E/??__F thunks of its globals -- are not, and left in they match
+    # by coincidence (nolfsrc's sdkforce.obj `_$E46` was credited with 71
+    # bytes inside sm_ResetProfileCounters). Dropped before any placement.
+    for n in [n for n in funcs if n not in from_lib and
+              n.split(":", 1)[0].lower() in DRIVER_OBJS and
+              re.match(r"_?\$E\d|\?\?__[EF]", n.split(":", 1)[-1])]:
+        funcs.pop(n)
+        unpadded.pop(n, None)
 
     # A target's `unreadable` (a regex on `module:symbol`) names functions
     # of ours whose shipped counterparts lie where the image cannot be
@@ -808,6 +882,19 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
         at = (fresh or hits)[0]
         matched[at] = len(code)
         PLACED_SYMS[(label, at)] = n
+
+    # Matches may not overlap. find() admits a hit at any offset, so a short
+    # body's masked shape can recur inside a longer function another of ours
+    # already matched in full (an 8-byte HostSession wrapper inside
+    # CClassMgr::Init): both cannot be shipped functions, and counting both
+    # counts those bytes twice. Each byte of the image is credited once:
+    # matches are taken in order of evidence -- placed at the address its
+    # name gives, then at an enumerated function start, then anywhere --
+    # longest first, and one that intersects a match already taken is
+    # dropped (but see the shared tail in _resolve_overlaps); its function
+    # then takes its next free hit that intersects nothing, if it has one.
+    _resolve_overlaps(label, matched, placed, start_set, funcs, all_hits,
+                      unpadded, find, text, tva)
 
     # A library linked into an image is one contiguous block of it, so a
     # library function's hit strictly inside another matched function is a
@@ -1934,6 +2021,19 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             # a start whose extent is all padding: not a function
             continue
         where = region(tgt, a)
+        # The region decides first: a match outside `app` does not make an
+        # address counted. A target's `compiler_output` ranges are the one
+        # exception the target declares (its .text$x, .text$yc and .text$yd:
+        # the exception funclets, initializers and terminators the compiler
+        # made of OUR source, among the runtime's own): a row there counts
+        # where a function of ours is placed or paired, and stays `crt`
+        # otherwise. Anywhere else outside `app` -- the runtime, the import
+        # thunks, a library's tail -- nothing counts, whatever matches.
+        if where == "crt":
+            if not (_in(co_ranges, a) and (a in matched or a in paired or
+                                           a in small)):
+                rows.append((label, "sub_%x" % a, size, "crt"))
+                continue
         if where in ("encrypted", "middleware"):
             rows.append((label, "sub_%x" % a, size, where))
         elif a in matched:
@@ -1950,6 +2050,19 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
                          "attempted" if a in touched else "todo"))
         else:
             rows.append((label, "sub_%x" % a, size, "crt"))
+    # Invariant: no byte of the image is counted twice.
+    end = 0
+    over = []
+    for _l, n, size, st in rows:
+        if not n.startswith("sub_") or st in ("crt", "middleware", "encrypted"):
+            continue
+        a = int(n[4:], 16)
+        if a < end:
+            over.append(n)
+        end = max(end, a + size)
+    if over:
+        print(f"  {label}: WARNING: {len(over)} counted row(s) overlap the "
+              f"one before: {', '.join(over[:8])}", file=sys.stderr)
     return rows
 
 
@@ -2145,6 +2258,17 @@ def _touched_index(tgt):
     return out
 
 
+def image_objs(tgt, ours):
+    """Our side of an image target: what our link of it read (its .rsp), or
+    the target's `objs` globs; less its `third_party` inputs."""
+    objs = link_inputs(ours)
+    if objs is None:
+        objs = sorted({os.path.relpath(p, REPO) for g in tgt.get("objs", ())
+                       for p in glob.glob(os.path.join(REPO, g), recursive=True)})
+    skip = {s.lower() for s in tgt.get("third_party", ())}
+    return [o for o in objs if os.path.basename(o).lower() not in skip]
+
+
 def score_target(tgt):
     """(rows, our build or None) for one target."""
     ours = built_image(tgt)
@@ -2160,17 +2284,41 @@ def score_target(tgt):
             return rows_for_image(tgt, objs, None), None
     if not ours:
         return rows_for_unbuilt(tgt), None
-    objs = link_inputs(ours)
-    if objs is None:
-        objs = sorted({os.path.relpath(p, REPO) for g in tgt.get("objs", ())
-                       for p in glob.glob(os.path.join(REPO, g), recursive=True)})
-    skip = {s.lower() for s in tgt.get("third_party", ())}
-    objs = [o for o in objs if os.path.basename(o).lower() not in skip]
+    objs = image_objs(tgt, ours)
     if not objs:
         sys.exit("progress.py: %s: %s has no link response file (%s.rsp) and "
                  "the target lists no objs" % (tgt["label"], ours, ours))
     linked = ours if tgt.get("linked_oracle") else None
-    return rows_for_image(tgt, objs, our_map(ours), linked), ours
+    rows = rows_for_image(tgt, objs, our_map(ours), linked)
+    if whole_image_identical(tgt, ours):
+        # The strongest evidence there is: our whole image is the retail
+        # one, but for the link's time stamps and checksum. Every function
+        # in it is identical, however little of it the masked match could
+        # prove (a short function, or one whose relocations alone differ).
+        WHOLE_IMAGE.add(tgt["label"])
+        rows = [(l, n, size, "identical" if st in ("near", "small", "todo",
+                                                    "attempted") else st)
+                for l, n, size, st in rows]
+    return rows, ours
+
+
+WHOLE_IMAGE = set()     # the labels of targets whose image is retail's
+
+
+def whole_image_identical(tgt, ours):
+    """True when our build of an image target equals the shipped image with
+    only buildcmp.py's normalisation (link time stamps, checksum, the debug
+    directory's time and signature): no address masked, nothing moved."""
+    from buildcmp import norm_pe
+    if tgt.get("readable") or tgt.get("encrypted"):
+        return False
+    a = bytearray(open(os.path.join(REPO, tgt["shipped"]), "rb").read())
+    b = bytearray(open(os.path.join(REPO, ours), "rb").read())
+    if len(a) != len(b):
+        return False
+    norm_pe(a)
+    norm_pe(b)
+    return a == b
 
 
 def main():
@@ -2346,6 +2494,9 @@ def main():
     for label in order:
         line(label, targets[label],
              "" if targets[label]["started"] else "  (no build yet)")
+        if label in WHOLE_IMAGE:
+            print(f"{'':<18} (the whole image is retail's but for the link's "
+                  f"time stamps: every function identical)")
     for t in TARGETS:
         if t["kind"] == "resources":
             line(t["label"], targets[t["label"]],
