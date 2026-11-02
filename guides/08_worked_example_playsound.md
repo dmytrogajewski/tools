@@ -1,6 +1,6 @@
 # 08 · A worked example: chasing byte-identity (CServerMgr::PlaySound)
 
-[06-worked-example-engine](06-worked-example-engine.md) reconstructed a 71-byte
+[06-worked-example-engine](06_worked_example_engine.md) reconstructed a 71-byte
 argument-checker. This guide is the other end of the difficulty scale: a
 494-byte function with multiple inheritance, floating point, an SDK struct, two
 inlined list operations, and — the real subject of this guide — a whole
@@ -10,8 +10,8 @@ pseudocode to byte-identical in about a dozen compiles, and every wrong
 attempt taught a reusable rule. Those rules are the
 point; the sound system is just the vehicle.
 
-Prerequisites: the loop from [02](02-the-loop.md), the disassembly conventions
-from [03](03-reading-disassembly.md), vtable naming from [07](07-vtables.md).
+Prerequisites: the loop from [02](02_the_loop.md), the disassembly conventions
+from [03](03_reading_disassembly.md), vtable naming from [07](07_vtables.md).
 
 ---
 
@@ -118,7 +118,7 @@ inlining: `*(void**)pSound = pBank->m_pFreeList; pBank->m_pFreeList = pSound;`
 
 ## 5 · The mnemonic diff: finding structure inside 494 bytes
 
-With the byte diff (from [02](02-the-loop.md)) showing hundreds of scattered
+With the byte diff (from [02](02_the_loop.md)) showing hundreds of scattered
 mismatches, switch tools. Normalize both instruction streams — every address
 and immediate to `X` — and diff *those*. `tools/fndiff.py` does exactly this
 (and then tries every renaming of the callee-saved registers, to separate

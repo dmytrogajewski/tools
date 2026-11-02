@@ -16,6 +16,12 @@
   retailextract.py audit        <gamedir>              every PE file in a game
                                                        directory, with its
                                                        origin
+  retailextract.py art          <retaildir> <image> <resdir> <file>=<kind>:<id> ...
+                                                       an image's icons,
+                                                       cursors and bitmaps,
+                                                       as the files a
+                                                       resource script
+                                                       compiles
 
 <retaildir> is No One Lives Forever 2 (Europe) with the English 1.3 update,
 as the rez/ submodule installs it (rez/install-games.sh nolf2-eu-1.3:
@@ -68,9 +74,25 @@ lists every PE file in the directory with its origin, failing on any that
 is neither built here, nor third-party runtime, nor the modern build's
 open-source replacement (EXT) -- or on any PE file still
 inside a .rez archive.
+
+`art` reads resources out of one retail image (<image>, its path in the
+retail install) and writes them into <resdir> as the files a resource
+script compiles back into the same resources: `icon` an RT_GROUP_ICON and
+its RT_ICON images as an .ico, `cursor` an RT_GROUP_CURSOR and its
+RT_CURSOR images as a .cur, `bitmap` an RT_BITMAP as a .bmp, and `raw:<type>`
+any other resource's data as it is. <id> is the group's (or resource's)
+number or name. The .ico/.cur lists the images in the group's order, with
+the group entry's fields, so rc.exe gives each image the same place, numbered
+in that order (it numbers icon and cursor images from 1 up, in the order the
+script names them, across all of its icons and cursors). For art that is
+the retail game's and not ours to commit: the build writes it, the
+repository ignores it. A file already right is left untouched, so a
+rebuild sees no change. E.g. an engine's icon:
+  art <retaildir> Lithtech.exe src/.../res lithtech.ico=icon:128
 """
 import os
 import shutil
+import struct
 import sys
 from pathlib import Path
 
@@ -361,11 +383,133 @@ def cmd_audit(gamedir):
     return 1 if bad else 0
 
 
+RT_CURSOR, RT_BITMAP, RT_ICON, RT_GROUP_CURSOR, RT_GROUP_ICON = 1, 2, 3, 12, 14
+
+
+def pe_resources(img):
+    """{(type, name): data} of a PE image's resources, the first language of
+    each. A string type or name is upper case, as rc.exe stores it."""
+    pe = struct.unpack_from("<I", img, 0x3C)[0]
+    nsec = struct.unpack_from("<H", img, pe + 6)[0]
+    optsz = struct.unpack_from("<H", img, pe + 20)[0]
+    rva = struct.unpack_from("<I", img, pe + 24 + 96 + 2 * 8)[0]   # directory 2
+    if not rva:
+        return {}
+    secs = []
+    for i in range(nsec):
+        o = pe + 24 + optsz + 40 * i
+        vsz, va, rawsz, raw = struct.unpack_from("<IIII", img, o + 8)
+        secs.append((va, max(vsz, rawsz), raw))
+
+    def off(r):
+        for va, sz, raw in secs:
+            if va <= r < va + sz:
+                return raw + r - va
+        raise ValueError(f"resource RVA {r:#x} outside every section")
+
+    base = off(rva)
+
+    def name(v):
+        if v & 0x80000000:
+            o = base + (v & 0x7FFFFFFF)
+            n = struct.unpack_from("<H", img, o)[0]
+            return img[o + 2:o + 2 + 2 * n].decode("utf-16-le").upper()
+        return v
+
+    def entries(o):
+        nn, ni = struct.unpack_from("<HH", img, o + 12)
+        for i in range(nn + ni):
+            yield struct.unpack_from("<II", img, o + 16 + 8 * i)
+
+    out = {}
+    for t, tsub in entries(base):
+        for n, nsub in entries(base + (tsub & 0x7FFFFFFF)):
+            for _lang, leaf in entries(base + (nsub & 0x7FFFFFFF)):
+                drva, dsz = struct.unpack_from("<II", img, base + leaf)
+                out[(name(t), name(n))] = img[off(drva):off(drva) + dsz]
+                break
+    return out
+
+
+def icon_file(res, group):
+    """An RT_GROUP_ICON and its images as an .ico file."""
+    g = res[(RT_GROUP_ICON, group)]
+    n = struct.unpack_from("<H", g, 4)[0]
+    head, body, at = struct.pack("<HHH", 0, 1, n), b"", 6 + 16 * n
+    for i in range(n):
+        w, h, cc, rsv, planes, bpp, _size, rid = struct.unpack_from("<BBBBHHIH", g, 6 + 14 * i)
+        data = res[(RT_ICON, rid)]
+        head += struct.pack("<BBBBHHII", w, h, cc, rsv, planes, bpp, len(data), at + len(body))
+        body += data
+    return head + body
+
+
+def cursor_file(res, group):
+    """An RT_GROUP_CURSOR and its images as a .cur file (an RT_CURSOR is
+    the hot spot, then the image; the group gives twice the height)."""
+    g = res[(RT_GROUP_CURSOR, group)]
+    n = struct.unpack_from("<H", g, 4)[0]
+    head, body, at = struct.pack("<HHH", 0, 2, n), b"", 6 + 16 * n
+    for i in range(n):
+        w, h2, _planes, _bpp, _size, rid = struct.unpack_from("<HHHHIH", g, 6 + 14 * i)
+        data = res[(RT_CURSOR, rid)]
+        hx, hy = struct.unpack_from("<HH", data, 0)
+        dib = data[4:]
+        head += struct.pack("<BBBBHHII", w, h2 // 2, 0, 0, hx, hy, len(dib), at + len(body))
+        body += dib
+    return head + body
+
+
+def bmp_file(dib):
+    """An RT_BITMAP (a packed DIB) as a .bmp file."""
+    hsz, bpp, used = (struct.unpack_from("<I", dib, 0)[0], struct.unpack_from("<H", dib, 14)[0],
+                      struct.unpack_from("<I", dib, 32)[0])
+    colors = used or (1 << bpp if bpp <= 8 else 0)
+    return b"BM" + struct.pack("<IHHI", 14 + len(dib), 0, 0, 14 + hsz + 4 * colors) + dib
+
+
+def cmd_art(retaildir, image, resdir, specs):
+    r = Retail(retaildir)
+    p = r.find(image)
+    res = pe_resources((r.root / p).read_bytes())
+    resdir = Path(resdir)
+    resdir.mkdir(parents=True, exist_ok=True)
+
+    def ident(s):
+        return int(s, 0) if s[:1].isdigit() else s.upper()
+
+    for spec in specs:
+        fname, _, what = spec.partition("=")
+        kind, _, rid = what.rpartition(":")
+        if not fname or not kind:
+            sys.exit(f"retailextract: art: bad spec {spec!r} (<file>=<kind>:<id>)")
+        rid = ident(rid)
+        try:
+            if kind == "icon":
+                data = icon_file(res, rid)
+            elif kind == "cursor":
+                data = cursor_file(res, rid)
+            elif kind == "bitmap":
+                data = bmp_file(res[(RT_BITMAP, rid)])
+            elif kind.startswith("raw:"):
+                data = res[(ident(kind[4:]), rid)]
+            else:
+                sys.exit(f"retailextract: art: unknown kind {kind!r} in {spec!r}")
+        except KeyError as e:
+            sys.exit(f"retailextract: art: {r.name}:{p} has no resource {e} for {spec!r}")
+        dest = resdir / fname
+        if not dest.exists() or dest.read_bytes() != data:
+            dest.write_bytes(data)
+        print(f"   {dest}  <-  {r.name}:{p} {what}")
+
+
 def main():
     a = sys.argv[1:]
     cmds = {"resources": cmd_resources, "thirdparty": cmd_thirdparty,
             "openruntime": cmd_openruntime, "reference": cmd_reference}
-    if len(a) == 4 and a[0] == "thirdparty" and a[3] in ("retail", "open"):
+    if len(a) >= 5 and a[0] == "art":
+        cmd_art(a[1], a[2], a[3], a[4:])
+    elif len(a) == 4 and a[0] == "thirdparty" and a[3] in ("retail", "open"):
         cmd_thirdparty(a[1], a[2], a[3])
     elif len(a) == 3 and a[0] in cmds:
         cmds[a[0]](a[1], a[2])

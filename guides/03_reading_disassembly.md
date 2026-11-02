@@ -173,7 +173,7 @@ interface implementations are composed this way. Distinguish it from:
 Reproduce it with the outer class's own vptr at +0, a **concrete** implementation
 object at +4, and dispatch through a pointer to its **abstract** base — VC6
 devirtualizes (and stops matching) if the static type is the concrete class. Full
-recipe in [06-worked-example-engine](06-worked-example-engine.md#the-embedded-interface-pattern).
+recipe in [06-worked-example-engine](06_worked_example_engine.md#the-embedded-interface-pattern).
 
 ## Where the local lives (and why the frame changed)
 
@@ -215,7 +215,7 @@ each retail binary, so most of what used to look like revision variance can now 
 be compiled the right way instead. What remains is either a genuine free
 choice the allocator made or a source shape we have not found yet. Mark these
 `near`, comment them, move on — and see
-[09-codegen-patterns](09-codegen-patterns.md#known-near-classes) for the full
+[09-codegen-patterns](09_codegen_patterns.md#known-near-classes) for the full
 list with worked evidence:
 
 - **Tail merging** — SP3 sometimes keeps a duplicated epilogue or a duplicated
@@ -228,7 +228,7 @@ list with worked evidence:
   `esi`↔`edi`) swap when the allocator had a free choice. Everything else
   matches; the registers are just relabeled.
 
-The test: run the normalized diff from [02-the-loop](02-the-loop.md#reading-a-diff).
+The test: run the normalized diff from [02-the-loop](02_the_loop.md#reading-a-diff).
 If nothing but register names and stack slots differ, and the shape is one of the
 above, it's a genuine near. If a real instruction, constant, or branch differs,
 it is **not** — there's still a source fix to find.

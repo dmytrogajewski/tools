@@ -31,6 +31,19 @@ reconstruct (or, as a last resort, to carry as labelled shipped bytes).
 
 Usage:
   vtabcheck.py <target> [--all] [--sym=SUBSTR] [--spec=FILE] [--aliases=RSP]
+               [--calls] [--known=FILE]
+  vtabcheck.py --targets    every built target, --calls, held to
+                            progress/vtab-known.txt (make progress)
+
+A slot or call counts as a problem only when it is contradicted: our
+function is placed elsewhere and its body does not fit the shipped one
+(VC7.1's /OPT:ICF folds identical bodies under any one of their names, so
+the same code under another name agrees), or a table is SHORT. A slot or
+call nothing of ours can be compared with is counted as unverified. A
+table of ours that agrees slot for slot with another shipped table than
+the one placements map it to is the mapping's mistake, if one to one.
+Calls are only read in functions whose body fits exactly one shipped
+address. Exits 1 on a problem not in the --known file.
 
 NOLF2: the target is looked up in progress/targets.py (tools/tgt.py); our
 image, its .map and its link inputs (objects and libraries, from the .rsp)
@@ -224,17 +237,20 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     opts = dict((a.split("=", 1) + [True])[:2] for a in sys.argv[1:]
                 if a.startswith("--"))
+    if opts.get("--targets"):
+        return check_targets(opts)
     if len(args) != 1:
         sys.exit(__doc__)
     os.chdir(REPO)
     tgt = tgt_mod.find(args[0])
     label = tgt["label"]
+    known = load_known(opts.get("--known"), label)
     ship_path = tgt["shipped"]
     ours_img = tgt_mod.require_built(tgt)
     mapf = tgt_mod.ourmap(tgt)
     if not mapf:
         sys.exit("%s: no .map beside %s" % (label, ours_img))
-    objs = tgt_mod.objs(tgt)
+    objs = progress.image_objs(tgt, ours_img)
     pc = tgt.get("purecall") or find_purecall(os.path.join(REPO, ship_path))
     if pc:
         PURECALL[label] = pc
@@ -256,12 +272,23 @@ def main():
             ship2sym[a].add(n)
 
     ship = Img(os.path.join(REPO, ship_path))
+    # the import calls a copy protection rewrote, put back as progress.py
+    # puts them back for its match (the target's `iat_calls`)
+    if tgt.get("iat_calls"):
+        ship.text = progress._restore_iat_calls(tgt, ship.text, ship.tlo)
     our = Img(os.path.join(REPO, ours_img))
     s2a, a2s = load_map(os.path.join(REPO, mapf))
     # `??_E` (vector deleting dtor) is a weak external onto `??_G` in the
     # objects that need it; naming it from another object does not resolve.
     for a in a2s:
         a2s[a].sort(key=lambda n: n.startswith("??_E"))
+    # the link's alias file: --aliases, or link/aliases.rsp beside the
+    # build's directory (nolfsrc's engine links its stand-ins that way)
+    if not opts.get("--aliases"):
+        auto = os.path.join(os.path.dirname(os.path.dirname(ours_img)), "link",
+                            "aliases.rsp")
+        if os.path.exists(os.path.join(REPO, auto)):
+            opts["--aliases"] = auto
     aliases = load_aliases(opts["--aliases"]) if opts.get("--aliases") else {}
 
     # Rosetta: data symbols -> shipped address, from placed functions' DIR32s
@@ -281,7 +308,21 @@ def main():
         if lb == label:
             placed[n.split(":", 1)[1]] = a
     seen = collections.defaultdict(set)
+    from exematch import find as _efind
+
+    def _rosetta_ok(code, mask, base):
+        if len(code) - len(mask) < 8:
+            return False
+        hits = []
+        for h in _efind(ship.text, ship.tlo, code, mask):
+            hits.append(h)
+            if len(hits) > 1:
+                return False
+        return hits == [base]
+
     funcrels = {}
+    variants = {}         # symbol -> every distinct (code, mask) of it
+    relvars = {}          # ... and with each, its relocations
     compiled = {}         # vtable -> slot symbols, as the source declares it
     shape_of, by_shape = {}, collections.defaultdict(list)
     code_of = {}
@@ -302,6 +343,13 @@ def main():
             for name, (_c, _m, rels) in f.items():
                 funcrels.setdefault(name, rels)
                 key = bytes(0 if i in _m else b for i, b in enumerate(_c))
+                # every distinct copy: a template COMDAT compiles differently
+                # in different objects (VC7.1's inlining), and the copy our
+                # link kept need not be the first one read
+                vs_ = variants.setdefault(name, [])
+                if (_c, _m) not in vs_:
+                    vs_.append((_c, _m))
+                    relvars.setdefault(name, []).append((_c, _m, rels))
                 if name not in shape_of:
                     code_of[name] = (_c, _m)
                     shape_of[name] = key
@@ -310,12 +358,25 @@ def main():
             if name not in placed:
                 continue
             base = placed[name]
+            # The Rosetta stone has to be the right stone: a function whose
+            # masked bytes fit several shipped addresses (the constructors
+            # of same-shape classes, every GameBase plug-in's) may be
+            # placed at a sibling's, and its relocations then name the
+            # sibling's table and globals. Only a body that fits one
+            # shipped address, and fits it, maps anything.
+            if not _rosetta_ok(_c, _m, base):
+                continue
             for off, kind, sym in rels:
                 if kind != "abs":
                     continue
                 v = ship.dword(base + off)
                 if v is not None:
-                    seen[sym].add(v)
+                    # the symbol's own shipped address: less the addend our
+                    # object adds at this site (`arr + 0x100`), which is the
+                    # field's content in the object
+                    addend = struct.unpack_from("<i", _c, off)[0] \
+                        if off + 4 <= len(_c) else 0
+                    seen[sym].add((v - addend) & 0xFFFFFFFF)
 
     shipped_tabs = collections.defaultdict(dict)
     shipped_args = {}     # shipped function -> dwords its `ret` pops
@@ -381,13 +442,49 @@ def main():
                 return group[0]
         return None
 
-    def fits(n, st):
-        code, mask = code_of[n]
+    _uniq = {}
+
+    def unique_fit(n):
+        """Our body fits exactly one shipped address (any of its copies)."""
+        if n not in _uniq:
+            hits = set()
+            for code, mask in variants.get(n) or [code_of[n]]:
+                if len(code) - len(mask) < 8:
+                    hits.add(None)
+                    hits.add(0)
+                    break
+                for h in _efind(ship.text, ship.tlo, code, mask):
+                    hits.add(h)
+                    if len(hits) > 1:
+                        break
+            _uniq[n] = len(hits) == 1
+        return _uniq[n]
+
+    def fits_copy(cm, st):
+        code, mask = cm
         o = st - ship.tlo
         t = ship.text
         if o < 0 or o + len(code) > len(t):
             return False
         return all(i in mask or t[o + i] == code[i] for i in range(len(code)))
+
+    def fits_ours(cm, va):
+        code, mask = cm
+        o = va - our.tlo
+        t = our.text
+        if o < 0 or o + len(code) > len(t):
+            return False
+        return all(i in mask or t[o + i] == code[i] for i in range(len(code)))
+
+    def fits(n, st):
+        o = st - ship.tlo
+        t = ship.text
+        for code, mask in variants.get(n) or [code_of[n]]:
+            if o < 0 or o + len(code) > len(t):
+                continue
+            if all(i in mask or t[o + i] == code[i] for i in range(len(code))):
+                return True
+        return False
 
     def method_of(n):
         if n.startswith("??_G") or n.startswith("??_E") or n.startswith("??1"):
@@ -552,7 +649,24 @@ def main():
     our_starts = sorted(a2s)
     import bisect
     want = opts.get("--sym")
+    table_starts = {a for n, aa in seen.items() if n.startswith("??_7")
+                    for a in aa}
+    # ... or where the shipped image refers to an address inside it (the
+    # vptr store of a constructor no placement reaches): every dword of
+    # the image, at any offset, that points into .rdata
+    lo_r, hi_r = min(shipped_tabs or [0]), max(shipped_tabs or [0]) + 0x10000
+    refs = set()
+    dd = ship.d if hasattr(ship, "d") else open(os.path.join(REPO, ship_path), "rb").read()
+    for i in range(len(dd) - 3):
+        v = dd[i] | dd[i + 1] << 8 | dd[i + 2] << 16 | dd[i + 3] << 24
+        if lo_r <= v < hi_r:
+            refs.add(v)
+    table_starts |= refs
     bad_tabs = 0
+    unverified_tabs = 0
+    remapped_tabs = 0
+    remaps = []             # (our table, the shipped table it agrees with)
+    agreeing = set()        # shipped tables one of ours agrees with as mapped
     def choose(sym):
         remapped_from = None
         sa = seen[sym]
@@ -647,6 +761,14 @@ def main():
             while ship.is_code(ship.dword(a)):
                 sslots.append(ship.dword(a))
                 a += 4
+        # Without RTTI (/GR-) nothing separates two tables in .rdata, and
+        # a shipped table read to the first non-code dword runs on into the
+        # next (CLTCursorInst's 3 slots and CLTCursor's 9 as one of 12).
+        # A table ends where another table some placement names begins.
+        for k in range(1, len(sslots)):
+            if sva + 4 * k in table_starts:
+                sslots = sslots[:k]
+                break
         # vtabaudit cuts a run at every address something references, and a
         # stray reference into a table splits it (CSaveLoadMessage's 36-slot
         # ILTMessage table was recorded as 6 + 30). An SDK interface says how
@@ -674,6 +796,21 @@ def main():
         while a < nxt and our.is_code(our.dword(a)):
             oslots.append(our.dword(a))
             a += 4
+        # Past our table's end, shipped slots whose functions are all
+        # another class's, a class none of our slots names, are the next
+        # table run on (CTO2GameServerShell's 23 slots, then
+        # CTO2MissionButeMgr's Init and Term), not slots we lack.
+        if len(sslots) > len(oslots) == len(compiled.get(sym, oslots)):
+            ours_cls = {class_of(sym)}
+            for o_ in oslots:
+                ours_cls |= {class_of(n_) for n_ in a2s.get(o_, ())}
+            # (any of the extra slots will do: the first can be a same-shape
+            # deleting destructor placed under a base class's name)
+            for st_ in sslots[len(oslots):]:
+                nxt_names = ship2sym.get(st_, ())
+                if nxt_names and not {class_of(n_) for n_ in nxt_names} & ours_cls:
+                    sslots = sslots[:len(oslots)]
+                    break
         probs = []
         for k, st in enumerate(sslots):
             if k >= len(oslots):
@@ -682,7 +819,19 @@ def main():
             got = our_to_ship(oslots[k])
             if st in got:
                 continue
-            probs.append((k, "WRONG" if got else "UNKNOWN", oslots[k], st))
+            # The same code under another name is the same slot: VC7.1's
+            # /OPT:ICF folds identical template bodies (every CMoArray<T>::
+            # GenBegin) into one, and the two links pick different names
+            # for it. A body of ours at our slot that fits the shipped
+            # target's bytes, its relocations reading back right, agrees.
+            if any(slot_fits(x, st) for x in a2s.get(oslots[k], ())):
+                continue
+            # Placed elsewhere is only a contradiction when the placement is
+            # the one place our body fits: two same-shape bodies (Dos- and
+            # RezFileStream::Release) are placed either way round
+            ours_k = [canon(x) for x in a2s.get(oslots[k], ()) if canon(x) in code_of]
+            sure = got and ours_k and all(unique_fit(x) for x in ours_k)
+            probs.append((k, "WRONG" if sure else "UNKNOWN", oslots[k], st))
         # Only STAND-INS go in the spec: a table the compiler emitted shorter
         # than the shipped one. A full-length compiled table is the source's
         # own declaration and stays as compiled even where this check
@@ -754,18 +903,76 @@ def main():
                 sus = suspect(n, st)
                 tag = "SUSPECT" if [x for x in sus if not x.startswith("?")] else "SOFT"
                 spec.append("    %s%s" % (n, ("  # %s slot %d 0x%08x: " % (tag, k, st) + " ".join(sus[:3])) if sus else ""))
+        def agrees(oslots_, sslots_):
+            return len(oslots_) >= len(sslots_) and all(
+                st_ in our_to_ship(o_) or
+                any(slot_fits(x, st_) for x in a2s.get(o_, ()))
+                for o_, st_ in zip(oslots_, sslots_))
+
+        remapped = None
+        if probs and sslots:
+            # Our table may be right and the mapping wrong: same-shape
+            # constructors (the eight animation channel classes') are
+            # placed in rotation, so each of our tables is paired with a
+            # sibling's. A shipped table ours agrees with slot for slot,
+            # of the same length, is the one it stands for.
+            # (of our table's own length: a swapped pair of tables of
+            # different lengths -- CUIOption_Impl's 31 and CUIStaticImage_
+            # Impl's 20 -- shows as one SHORT and one too long)
+            for t2, sl in shipped_tabs.items():
+                if t2 == sva or len(sl) != len(oslots):
+                    continue
+                if agrees(oslots, [sl[i] for i in sorted(sl)]):
+                    remapped = t2
+                    break
+        if remapped is not None:
+            remaps.append((sym, remapped))
+            print("%s  ours 0x%08x agrees slot for slot with shipped 0x%08x, "
+                  "not 0x%08x the placements map it to: the mapping, not the "
+                  "table" % (sym, ova, remapped, sva))
+            remapped_tabs += 1
+            continue
+        if not probs:
+            agreeing.add(sva)
+        if probs and sym in known:
+            print("%s: known (%s)" % (sym, known[sym]))
+            continue
         if not probs and not opts.get("--all"):
             continue
-        bad_tabs += bool(probs)
+        # Only a contradiction fails: a slot SHORT, or WRONG (our function
+        # is placed at another shipped address and its body does not fit
+        # this one). UNKNOWN -- our function has no shipped placement to
+        # judge by -- is reported, and counted apart, as unverified.
+        if any(kind != "UNKNOWN" for _k, kind, _o, _s in probs):
+            bad_tabs += 1
+        elif probs:
+            unverified_tabs += 1
         print("%s  ours 0x%08x (%d slots)  shipped 0x%08x (%d slots)  %s" % (
             sym, ova, len(oslots), sva, len(sslots),
-            "OK" if not probs else "%d bad" % len(probs)))
+            "OK" if not probs else "%d bad" % len(probs) + (
+                "" if any(kd != "UNKNOWN" for _k, kd, _o, _s in probs)
+                else " (unverified)")))
         for k, kind, ot, st in probs:
             names = sorted(ship2sym.get(st, ()))
             print("   slot %2d %-7s ours=%s  shipped=0x%08x  have: %s" % (
                 k, kind, ("0x%08x %s" % (ot, ",".join(a2s.get(ot, [])[:2]))) if ot else "-",
                 st, " ".join(names[:3]) or "(none)"))
+    # A remap is only an explanation if it is one to one: two tables of ours
+    # standing for one shipped table, or for one another of ours already
+    # agrees with as mapped, is a table of ours that is wrong.
+    claims = collections.Counter(t for _s, t in remaps)
+    for sym, t in remaps:
+        if (claims[t] > 1 or t in agreeing) and sym in known:
+            print("%s: known (%s)" % (sym, known[sym]))
+        elif claims[t] > 1 or t in agreeing:
+            bad_tabs += 1
+            remapped_tabs -= 1
+            print("%s: agrees with shipped 0x%08x, which another table of ours "
+                  "already stands for: a problem" % (sym, t))
     print("tables with problems:", bad_tabs)
+    print("tables with unverified slots only:", unverified_tabs)
+    print("tables that agree with another shipped table than mapped:", remapped_tabs)
+    nbad = 0
 
     if opts.get("--calls"):
         # The link-level wiring check: for every function progress.py places
@@ -781,6 +988,9 @@ def main():
             va = resolve(sym2)
             if va:
                 dataof[va] |= aa
+        unverified = 0
+        checked = []
+
         for name, sa_ in sorted(sym2ship.items()):
             if name not in placed or len(sa_) != 1 or name not in funcrels:
                 continue
@@ -788,7 +998,31 @@ def main():
             ova = s2a.get(name)
             if not ova:
                 continue
-            for off, kind, sym2 in funcrels[name]:
+            # only where our body is the shipped bytes at st: a placement
+            # that is a pairing, not a match, puts our relocation offsets
+            # on other instructions, and reading "calls" there reads
+            # garbage (targets like 0x665a3a22)
+            # -- and of our copies, the one that is the bytes at both
+            # addresses: another object's copy of a template can be laid
+            # out differently, and its relocation offsets would then fall
+            # on other instructions on one side or the other
+            if name in known:
+                continue
+            copy = None
+            for c_, m_, r_ in relvars.get(name, ()):
+                if fits_copy((c_, m_), st) and fits_ours((c_, m_), ova):
+                    copy = r_
+                    break
+            if copy is None:
+                continue
+            # ... and only where that address is the one place the body
+            # fits: a generic shape (a scalar deleting destructor, an
+            # ObjectBank<T>::Allocate) fits every class's copy, so its
+            # placement says nothing about which callee it should reach
+            if not unique_fit(canon(name)):
+                unverified += len(funcrels[name])
+                continue
+            for off, kind, sym2 in copy:
                 o = our.dword(ova + off)
                 v = ship.dword(st + off)
                 if o is None or v is None:
@@ -798,31 +1032,150 @@ def main():
                     v = (st + off + 4 + v) & 0xFFFFFFFF
                     if v in our_to_ship(o):
                         continue
-                    ok = False
-                    for x in a2s.get(o, []):
-                        cx = canon(x)
-                        if cx in code_of and fits(cx, v) and not hard(cx, v):
-                            ok = True
-                            break
-                    if ok or not our_to_ship(o) and not any(canon(x) in code_of for x in a2s.get(o, [])):
-                        continue        # nothing to compare against
+                    # Our callee's body at the shipped target is the same
+                    # call: the shipped linker folded identical bodies
+                    # (/OPT:ICF: template instances, destructors) under
+                    # another name. Only a body of ours known NOT to fit
+                    # there contradicts; a callee with no body of ours to
+                    # compare is unverified, and counted apart.
+                    if tgt_mod.region(tgt, v) in ("encrypted", "middleware"):
+                        # a call into the copy protection's pages (its
+                        # redirected import calls), or into third-party
+                        # code we do not build (D3DX): nothing to compare
+                        unverified += 1
+                        continue
+                    if any("callee:" + x in known for x in a2s.get(o, ())):
+                        continue        # a callee known to be wired so
+                    ours_c = [canon(x) for x in a2s.get(o, []) if canon(x) in code_of]
+                    checked.append((name, off, ova + off))
+                    if any(fits(cx, v) for cx in ours_c):
+                        continue
+                    # ... and a contradiction needs our callee to be known
+                    # elsewhere: its body fitting exactly one other shipped
+                    # address. A callee of ours that fits nowhere (a near
+                    # reconstruction) says nothing about this call.
+                    if not ours_c or not (ship.tlo <= v < ship.thi) or \
+                            not any(unique_fit(cx) for cx in ours_c):
+                        unverified += 1
+                        continue
                     nbad += 1
+                    if os.environ.get("VTABCHECK_DEBUG"):
+                        for cx in ours_c:
+                            c_, m_ = code_of[cx]
+                            o_ = v - ship.tlo
+                            bad_ = [i for i in range(len(c_)) if i not in m_
+                                    and (o_ + i >= len(ship.text) or ship.text[o_ + i] != c_[i])]
+                            print("  debug %s len %d first misfit %s" % (cx[:50], len(c_), bad_[:5]))
                     print("CALL  %s+0x%x (shipped 0x%08x): reaches %s, shipped reaches 0x%08x [%s]" % (
-                        name[:60], off, st, ",".join(a2s.get(o, ["0x%08x" % o])[:2])[:90], v,
+                        name, off, st, ",".join(a2s.get(o, ["0x%08x" % o])[:2])[:90], v,
                         " ".join(sorted(ship2sym.get(v, ()))[:2])[:90]))
                 else:
+                    if tgt.get("encrypted") and sym2.startswith("__imp_"):
+                        # a protected image's import table is the
+                        # protection's own, slot for slot: nothing to compare
+                        unverified += 1
+                        continue
+                    b_ = resolve(sym2)
+                    if b_:
+                        # compare symbol bases: our site's addend off both
+                        v = (v - (o - b_)) & 0xFFFFFFFF
+                        o = b_
                     if not (ship.tlo <= v < ship.thi) and o in dataof and dataof[o] and v not in dataof[o]:
                         nbad += 1
                         print("DATA  %s+0x%x (shipped 0x%08x): our 0x%08x %s stands for %s, shipped uses 0x%08x" % (
-                            name[:60], off, st, o, ",".join(a2s.get(o, [])[:1])[:60],
+                            name, off, st, o, ",".join(a2s.get(o, [])[:1])[:60],
                             ",".join("0x%08x" % x for x in sorted(dataof[o])[:3]), v))
         print("wiring problems:", nbad)
+        print("calls checked:", len(checked))
+        print("calls unverified (no body of ours to compare, or the caller's "
+              "placement not unique):", unverified)
+        if os.environ.get("VTABCHECK_LIST_CHECKED"):
+            for n_, off_, a_ in checked:
+                print("checked %s+0x%x (ours 0x%08x)" % (n_, off_, a_))
     if spec is not None:
         open(opts["--spec"], "w").write("\n".join(spec) + "\n")
         print("spec: %d tables, %d MISSING slots -> %s" % (
             sum(1 for l in spec if l.startswith("vtable")),
             sum(1 for l in spec if "MISSING" in l), opts["--spec"]))
+    # a problem is a failure: a caller can gate on the status (but see the
+    # README: a table reported is not yet a confirmed broken table for
+    # every compiler's output)
+    return 1 if bad_tabs or nbad else 0
+
+
+def class_of(sym):
+    """The class a mangled member function or vtable belongs to, roughly:
+    `?Init@CFoo@@...`, `??_GCFoo@@...`, `??_7CFoo@@6B@` -> CFoo."""
+    m = re.match(r"\?\?(?:_[0-9A-Z]|[0-9])(\w+)@", sym) or \
+        re.match(r"\?\w+@(\w+)@", sym)
+    return m.group(1) if m else sym
+
+
+def load_known(path, label):
+    """{symbol: reason} for `label` from a known-problems file: lines
+    `<target label><TAB><table or calling function's symbol><TAB><reason>`,
+    `#` comments. A table listed is not counted against the target; a
+    function listed has its calls left unchecked; `callee:<symbol>` leaves
+    every call that reaches that symbol of ours unchecked."""
+    out = {}
+    if not path or not os.path.exists(os.path.join(REPO, path)):
+        return out
+    for line in open(os.path.join(REPO, path), encoding="ascii"):
+        if line.startswith("#") or not line.strip():
+            continue
+        lab, sym, why = line.rstrip("\n").split("\t", 2)
+        if lab == label:
+            out[sym] = why
+    return out
+
+
+KNOWN_FILE = "progress/vtab-known.txt"
+
+
+def check_targets(opts):
+    """Every image target with a build and a map: its tables and its calls
+    (--calls), held to progress/vtab-known.txt. What `make progress` runs.
+    With --baseline=REASON, every problem found is appended to that file
+    under `# REASON` instead (a project taking the check up)."""
+    import subprocess
+    os.chdir(REPO)
+    rc = 0
+    base = opts.get("--baseline")
+    new_known = []
+    for t in progress.TARGETS:
+        if t.get("kind") != "image" or not tgt_mod.built(t) or not tgt_mod.ourmap(t):
+            continue
+        r = subprocess.run([sys.executable, os.path.abspath(__file__), t["label"],
+                            "--calls", "--known=progress/vtab-known.txt"],
+                           capture_output=True, text=True)
+        out = r.stdout.splitlines()
+        tail = [l for l in out if l.startswith(("tables with", "wiring problems",
+                                               "calls checked", "calls unverified"))]
+        print("  %s: %s" % (t["label"], "; ".join(tail) or r.stderr.strip()[-200:]))
+        if r.returncode:
+            rc = 1
+            for l in out:
+                m = re.match(r"(?:CALL|DATA)  (.+?)\+0x[0-9a-f]+ \(shipped", l) or \
+                    re.match(r"(\S+)  ours 0x[0-9a-f]+ .* bad$", l) or \
+                    re.match(r"(\S+): agrees with shipped .* a problem$", l)
+                if m:
+                    print("    " + l[:240])
+                    if (t["label"], m.group(1)) not in new_known:
+                        new_known.append((t["label"], m.group(1)))
+    if base and new_known:
+        p = os.path.join(REPO, KNOWN_FILE)
+        with open(p, "a", encoding="ascii") as f:
+            if os.path.getsize(p) == 0 if os.path.exists(p) else True:
+                f.write("## Known vtable and wiring problems: tools/vtabcheck.py "
+                        "--targets.\n## <target><TAB><table, calling function, "
+                        "or callee:<symbol>><TAB><reason>\n")
+            f.write("\n# %s\n" % base)
+            for lab, sym in new_known:
+                f.write("%s\t%s\t%s\n" % (lab, sym, base))
+        print("vtabcheck.py: %d entr(y/ies) recorded in %s" % (len(new_known), KNOWN_FILE))
+        return 0
+    return rc
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

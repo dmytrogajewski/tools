@@ -10,17 +10,17 @@ to engine licensees in March 2002, laid out as the source release is
 (Game/, Engine/, Libs/).
 
 Monolith's release has ServerDir.dll's headers and import library only.
-The SDK has its source: WONAPI (Game/Libs/WONAPI/, the WON/Titan client
-library, the version retail ServerDir.dll is built from) and an earlier
-CServerDir_Titan (Game/Libs/ServerDir/). This copies them into
-<src>/Game/Libs/ as the release's own files are kept -- text with LF line
-endings -- and applies the patches in src/nolf2src/jupiter/ (in name
-order, `patch -p1` from the SDK's root, no fuzz), which bring the 2002
-code to the 1.3 interface. Nothing of the SDK is committed: .gitignore
-lists every path written here.
+The SDK has the source of its library: WONAPI (Game/Libs/WONAPI/, the
+WON/Titan client library, the version retail ServerDir.dll is built from).
+This copies it into <src>/Game/Libs/ as the release's own files are kept
+-- text with LF line endings -- and applies the patches in
+src/nolf2src/jupiter/, if any (in name order, `patch -p1` from the SDK's
+root, no fuzz). Nothing of the SDK is committed: .gitignore lists every
+path written here.
 
-Not copied: the SDK's IServerDir.h (src/ has the 1.3 one) and ServerDir.dsp
-(a static library; src/Game/Libs/ServerDir/ServerDir.dsp builds the DLL).
+Not copied: the SDK's Game/Libs/ServerDir/, an earlier (2002)
+CServerDir_Titan. src/Game/Libs/ServerDir/ has the 1.3 one, from the
+F.E.A.R. source release's libs/ServerDir/.
 
 A file is written only when its content changes, so a rebuild redoes
 nothing; a file of WONAPI/ that the SDK does not have is removed.
@@ -36,8 +36,6 @@ PATCHES = os.path.join(HERE, "..", "src", "nolf2src", "jupiter")
 # (directory, files): every file of the directory when files is None
 WANTED = [
     ("Game/Libs/WONAPI", None),
-    ("Game/Libs/ServerDir", ["CServerDir_Titan.cpp", "CServerDir_Titan.h", "TitanTest.cpp",
-                             "TitanTest.h", "WinSync.h", "stdafx.cpp", "stdafx.h"]),
 ]
 
 
@@ -84,7 +82,7 @@ def main():
                 with open(os.path.join(stage, rel), "wb") as f:
                     f.write(data)
                 rels.append(rel)
-        for p in sorted(os.listdir(PATCHES)):
+        for p in sorted(os.listdir(PATCHES)) if os.path.isdir(PATCHES) else []:
             if not p.endswith(".patch"):
                 continue
             with open(os.path.join(PATCHES, p), "rb") as f:

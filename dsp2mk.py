@@ -13,6 +13,10 @@ compiler settings and custom build steps. It writes build/build.mk's rules
 for them, through build.mk's `compile` and `tool` macros:
 
   every .c/.cpp   cl (or the compiler in the make variable CL_<project>,
+                  in the environment ENV_<project>, or for one source
+                  CL_<project>__<source's base name>, ENV_<project>__<...>,
+                  where build.mk sets them; links and libraries
+                  likewise LINK_<project>, LIBEXE_<project>,
                   where build.mk sets one) <the project's ADD CPP, with the file's own ADD CPP
                   and SUBTRACT CPP applied, less /FD> /Fp"<intdir>\\<project>.pch"
                   (unless the file names its own /Fp)
@@ -60,6 +64,28 @@ import sys
 YX_FIRST = {"serverdir": "stdafx.obj"}
 
 _spelling = {}
+
+
+def load_spellings(path):
+    """The spellings earlier runs gave directories that do not exist yet.
+    Each workspace is converted by a run of its own, and two projects may
+    spell one output directory differently (`built\\Release`, `built\\release`):
+    on a tree where it is already built the disk decides, on a clean one the
+    first spelling must hold for every workspace, or one project's output
+    and another's input are two names for make."""
+    try:
+        for line in open(path):
+            here, comp, real = line.rstrip("\n").split("\t")
+            _spelling.setdefault((here, comp), real)
+    except (OSError, ValueError):
+        pass
+
+
+def save_spellings(path):
+    data = "".join(f"{h}\t{c}\t{r}\n" for (h, c), r in sorted(_spelling.items()))
+    if not os.path.exists(path) or open(path).read() != data:
+        with open(path, "w") as f:
+            f.write(data)
 
 
 def canon(path, leaf=True):
@@ -205,16 +231,38 @@ def parse_dsp(path, want, exact=None):
     return name, ttype, cfgname, cfg, files
 
 
+# Flags Developer Studio writes as two words (/D "X"): one item each.
+TWO_WORD = ("/D", "/I", "/U", "/FI")
+
+
+def flag_items(words):
+    """Words to items, a two-word flag and its argument together."""
+    items, i = [], 0
+    while i < len(words):
+        if words[i] in TWO_WORD and i + 1 < len(words):
+            items.append((words[i], words[i + 1]))
+            i += 2
+        else:
+            items.append((words[i],))
+            i += 1
+    return items
+
+
 def apply_cpp(base, add, sub):
-    """The project's cl flags with a file's ADD CPP and SUBTRACT CPP."""
-    flags = list(base)
-    for f in add:
-        if f[:3] in ("/Yc", "/Yu", "/YX"):
-            flags = [g for g in flags if g[:3] not in ("/Yc", "/Yu", "/YX")]
+    """The project's cl flags with a file's ADD CPP and SUBTRACT CPP. A
+    two-word flag is subtracted as a pair (SUBTRACT CPP /D "X" takes out
+    that /D alone); a one-word flag takes out every flag it begins."""
+    flags = flag_items(base)
+    for f in flag_items(add):
+        if f[0][:3] in ("/Yc", "/Yu", "/YX"):
+            flags = [g for g in flags if g[0][:3] not in ("/Yc", "/Yu", "/YX")]
         flags.append(f)
-    for s in sub:
-        flags = [g for g in flags if not g.startswith(s)]
-    return flags
+    for s in flag_items(sub):
+        if len(s) == 2:
+            flags = [g for g in flags if g != s]
+        else:
+            flags = [g for g in flags if not (len(g) == 1 and g[0].startswith(s[0]))]
+    return [w for g in flags for w in g]
 
 
 def without(flags, prefixes):
@@ -244,6 +292,8 @@ def main():
     if len(sys.argv) < 5:
         sys.exit(__doc__)
     dsw, want, out_mk = sys.argv[1], sys.argv[2], sys.argv[3]
+    spellings = os.path.join(os.path.dirname(out_mk) or ".", "dsp2mk-spellings.tsv")
+    load_spellings(spellings)
     wsdir = os.path.dirname(dsw)                    # relative to the tree root
     projects = parse_dsw(dsw)
 
@@ -336,7 +386,9 @@ def main():
                 base = os.path.splitext(ntpath.basename(src))[0]
                 obj = winjoin(wdir, f"{intdir}\\{base}.obj")
                 objs.append(obj)
-                mk.append(f"$(eval $(call compile,{obj},{pdir},{q(src)},$(ENV_GAME),$(or $(CL_{var}),$(CL)),"
+                ovar = f"{var}__{re.sub(r'\W', '_', base)}"
+                mk.append(f"$(eval $(call compile,{obj},{pdir},{q(src)},$(or $(ENV_{ovar}),$(ENV_{var}),$(ENV_GAME)),"
+                          f"$(or $(CL_{ovar}),$(CL_{var}),$(CL)),"
                           f"{q(' '.join(cmd))},wine-drives))")
                 if pch:
                     kind = next(f[2] for f in flags if f[:3] in ("/Yc", "/Yu", "/YX")).lower()
@@ -376,7 +428,7 @@ def main():
         if ttype == "Static Library":
             outspec = next((f[5:] for f in cfg.lib if f.lower().startswith("/out:")), f"{outdir}\\{name}.lib")
         else:
-            default = f"{outdir}\\{name}.{'exe' if ttype == 'Application' else 'dll'}"
+            default = f"{outdir}\\{name}.{'exe' if ttype in ('Application', 'Console Application') else 'dll'}"
             outspec = next((f[5:] for f in cfg.link if f.lower().startswith("/out:")), default)
         out = winjoin(wdir, outspec)
         outputs[key] = out
@@ -401,7 +453,8 @@ def main():
         if ttype == "Static Library":
             flags = without(cfg.lib, ["/out:"]) + [f"/out:{outspec}"]
             mk.append(f"$(eval $(call library,{out},{pdir},{q(' '.join(flags))},"
-                      f"{' '.join(objs)},{' '.join(rel(o) for o in objs)}))")
+                      f"{' '.join(objs)},{' '.join(rel(o) for o in objs)},"
+                      f"$(or $(ENV_{var}),$(ENV_GAME)),$(or $(LIBEXE_{var}),$(LIBEXE))))")
         else:
             flags = without(apply_cpp(cfg.link, [], cfg.sub_link), ["/out:", "/pdb", "/debug"])
             flags.append(f"/out:{outspec}")
@@ -414,7 +467,8 @@ def main():
             # the libraries explicitly then.
             pchs = [pch_makers[d.lower()] for d in deps if d.lower() in pch_makers]
             mk.append(f"$(eval $(call binary,{out},{pdir},{q(' '.join(flags))},"
-                      f"{' '.join(prereqs)},{' '.join(rel(o) for o in ins)},{' '.join(rel(o) for o in pchs)}))")
+                      f"{' '.join(prereqs)},{' '.join(rel(o) for o in ins)},{' '.join(rel(o) for o in pchs)},"
+                      f"$(or $(ENV_{var}),$(ENV_GAME)),$(or $(LINK_{var}),$(LINK))))")
         mk.append(f".PHONY: {var}")
         mk.append(f"{var}: {out}")
         mk.append(f"PROJECTS += {var}")
@@ -424,6 +478,7 @@ def main():
     if not os.path.exists(out_mk) or open(out_mk).read() != data:
         with open(out_mk, "w") as f:
             f.write(data)
+    save_spellings(spellings)
 
 
 if __name__ == "__main__":

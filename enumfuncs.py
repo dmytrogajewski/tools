@@ -13,6 +13,17 @@ single one is complete:
                                           — global-initializer groups, whose
                                             atexit registration nothing else
                                             references
+  4e. the `jmp rel32` target of an exception-unwind funclet (`lea/mov
+     ecx,...; jmp`), a rule-2 start
+                                          — destructors reached only when
+                                            unwinding
+  4f. a 16-aligned `movl $vtbl,(%ecx); ret` behind padding
+                                          — one-store destructors whose
+                                            callers inlined them
+  4g. the `jmp rel32` target of an atexit exit thunk (`mov ecx,imm32;
+     jmp`, pushed and handed to atexit)
+                                          — destructors inlined everywhere
+                                            else
   5. code that follows a `ret` (past padding) with a recognizable prologue
      and that nothing else references
                                           — functions only reached indirectly
@@ -56,16 +67,31 @@ class Image:
         self.pe = pe
         so = pe + 24 + optsz
         self.secs = []
+        code = set()
         for i in range(self.nsec):
             s = so + i * 40
             name = d[s : s + 8].rstrip(b"\0").decode("latin-1")
             vs, va, rs, rp = struct.unpack_from("<IIII", d, s + 8)
             self.secs.append((name, va, vs, rs, rp))
+            if struct.unpack_from("<I", d, s + 36)[0] & 0x20:   # CNT_CODE
+                code.add(name)
         for name, va, vs, rs, rp in self.secs:
             if name == ".text":
                 self.tlo = self.base + va
                 self.thi = self.tlo + vs
                 self.text = d[rp : rp + min(vs, rs)]
+        # Sections that hold no function pointers, whatever their dwords look
+        # like (rule 2 below): the resource and base-relocation directories
+        # (data directories 2 and 5) hold RVAs, offsets and UTF-16 text, and
+        # a code section other than .text holds instructions, not a table.
+        self.nopointers = {n for n in code if n != ".text"}
+        ndirs = struct.unpack_from("<I", d, pe + 24 + 92)[0]
+        for k in (2, 5):
+            if k < ndirs:
+                rva = struct.unpack_from("<I", d, pe + 24 + 96 + 8 * k)[0]
+                for name, va, vs, rs, rp in self.secs:
+                    if rva and va <= rva < va + max(vs, rs):
+                        self.nopointers.add(name)
 
     def rva2off(self, rva):
         for name, va, vs, rs, rp in self.secs:
@@ -110,9 +136,17 @@ def enumerate_functions(img):
         if text[off] == 0xE8:
             add(tlo + off + 5 + struct.unpack_from("<i", text, off + 1)[0], "call")
 
-    # 2. pointers into .text stored in other sections (vtables, tables)
+    # 2. pointers into .text stored in other sections (vtables, tables) --
+    #    not in the resource or relocation directories, nor in another code
+    #    section (Image.nopointers). A resource's UTF-16 text reads as
+    #    0x00XX00YY, and every one of those in .text's range was a false
+    #    start: 74 in lithtech.exe, cutting real functions in two (its
+    #    sound manager's Update at 0x4b0010 and 0x4b0082, a renderer
+    #    template's tail at 0x4f0004). A second code section (lithtech.exe's
+    #    copy protection, .cms_t) added only unaligned or mid-instruction
+    #    starts.
     for name, va, vs, rs, rp in img.secs:
-        if name == ".text":
+        if name == ".text" or name in getattr(img, "nopointers", ()):
             continue
         blob = img.d[rp : rp + min(vs, rs)]
         for o in range(0, len(blob) - 3, 4):
@@ -121,9 +155,12 @@ def enumerate_functions(img):
     # 3. `push imm32` operands that land in .text — callbacks handed to the
     #    API (DLGPROCs, WNDPROCs, enumeration callbacks). These are neither
     #    call targets nor stored in a table, so nothing else finds them.
+    registered = set()      # pushed and then called with (rule 4g)
     for off in range(len(text) - 5):
         if text[off] == 0x68:
             add(struct.unpack_from("<I", text, off + 1)[0], "cb")
+            if off + 5 < len(text) and text[off + 5] == 0xE8:
+                registered.add(struct.unpack_from("<I", text, off + 1)[0])
 
     # 3b. `movl $imm32, disp(%reg)` operands that land in .text -- a function
     #     address STORED INTO A TABLE AT RUN TIME rather than laid out in one.
@@ -196,10 +233,12 @@ def enumerate_functions(img):
             if tlo <= _v < thi:
                 data_ptrs.add(_v)
 
+    initializers = set()    # the `call` halves (rule 4c)
     for off in range(len(text) - 10):
         if text[off] == 0xE8 and text[off + 5] == 0xE9 and tlo + off in data_ptrs:
             add(tlo + off + 5 + struct.unpack_from("<i", text, off + 1)[0], "init")
             add(tlo + off + 10 + struct.unpack_from("<i", text, off + 6)[0], "init")
+            initializers.add(tlo + off + 5 + struct.unpack_from("<i", text, off + 1)[0])
 
     # 4b. a THUNK's target. Rule 4 handles `call ??__E<var>; jmp <atexit>`,
     #     but the commonest `$E` in these images is the degenerate form: a
@@ -235,7 +274,12 @@ def enumerate_functions(img):
     #     found qualifies: the same byte pattern at a `call`/`cb` start is
     #     ordinary code (a thiscall tail jump) in all the other hits (21 in
     #     server.dll and lithtech.exe, 31 in NOLF.exe).
-    for va in [v for v, t in list(src.items()) if t == "thunk"]:
+    #     The same initializer reached by rule 4's `call` (a `$E` thunk
+    #     `call ??__E<var> ; jmp <registrar>`) qualifies too: Object.lto
+    #     0x1016c1d0 -> CDebrisMgrPlugin::CDebrisMgrPlugin 0x1016c200,
+    #     which had merged into the exit thunk in front of it (0x1016c1f0,
+    #     25 bytes, really 10).
+    for va in [v for v, t in list(src.items()) if t == "thunk"] + sorted(initializers):
         off = va - tlo
         if 0 <= off < len(text) - 10 and text[off] == 0xB9 \
                 and text[off + 5] == 0xE9:
@@ -265,6 +309,77 @@ def enumerate_functions(img):
                 p += 1
             if p > off + 11 and p < len(text) and (tlo + p) % 16 == 0:
                 add(tlo + p, "stub")
+
+    # 4e. what an exception-unwind funclet tail-jumps to. A /GX funclet
+    #     (`__unwindfunclet$...`, in the image's .text$x tail and named by
+    #     an unwind map in .rdata, so rule 2 already has it) is `this` for
+    #     the object being unwound loaded into ecx and a jump to its
+    #     destructor: `lea/mov ecx,<frame slot>` or `mov ecx,imm32`, then
+    #     `jmp rel32`. A destructor that is inlined everywhere it is called
+    #     but still needed for unwinding is reached ONLY from such jumps:
+    #     ServerDir.dll's ~CWinSync_CSAuto (0x100016a0, 10 bytes:
+    #     LeaveCriticalSection), ~CWinSync_CS, ~CWinSync_Event and
+    #     STLport's ~_Node_Alloc_Lock, 38 funclets jumping to the first. Without
+    #     this each merged into the row before it.
+    #       8d 4d d8 | 8d 8d d32 | 8d 4c 24 d8 | 8d 8c 24 d32   lea ecx,...
+    #       8b 4d d8 | 8b 8d d32 | 8b 4c 24 d8 | 8b 8c 24 d32   mov ecx,...
+    #       b9 imm32                                           mov ecx,imm
+    #     optionally followed by `add ecx,imm` for a member (ServerDir's
+    #     ~CWinSync_Event, 0x10006360: `mov ecx,[ebp-0x10]; add ecx,0x28`).
+    for va in [v for v, t in list(src.items()) if t == "ptr"]:
+        off = va - tlo
+        if not 0 <= off < len(text) - 12:
+            continue
+        b0, b1 = text[off], text[off + 1]
+        n = None
+        if b0 == 0xB9:
+            n = 5
+        elif b0 in (0x8D, 0x8B):
+            n = {0x4D: 3, 0x8D: 6}.get(b1)
+            if n is None and text[off + 2] == 0x24:
+                n = {0x4C: 4, 0x8C: 7}.get(b1)
+        # a member's destructor: `add ecx,imm8|imm32` after the load
+        if n and text[off + n] == 0x83 and text[off + n + 1] == 0xC1:
+            n += 3
+        elif n and text[off + n] == 0x81 and text[off + n + 1] == 0xC1:
+            n += 6
+        if n and off + n + 5 <= len(text) and text[off + n] == 0xE9:
+            add(tlo + off + n + 5 + struct.unpack_from("<i", text, off + n + 1)[0],
+                "unwind")
+
+    # 4f. a one-store destructor on its own: `movl $vtbl,(%ecx) ; ret`
+    #     (c7 01 imm32 c3, 7 bytes), 16-aligned behind padding. A class's
+    #     destructor that only resets the vtable, unreferenced (its callers
+    #     inlined it) or reached through a funclet; nothing else finds it,
+    #     so it merged into the row in front: lithtech.exe 0x5546c0 behind
+    #     an initializer, 0x560470 behind another, snddrv.dll 0x100081e0
+    #     (ILTSoundSys::~ILTSoundSys, until now an extent split). 20 starts
+    #     in the eight code images.
+    for off in range(16, len(text) - 7, 16):
+        if text[off] == 0xC7 and text[off + 1] == 0x01 \
+                and text[off + 6] == 0xC3 and text[off - 1] in (0x90, 0xCC):
+            add(tlo + off, "stub")
+
+    # 4g. the destructor an atexit EXIT thunk tail-jumps to. The exit thunk
+    #     of a global (or function-static) class object is `mov $&obj,%ecx;
+    #     jmp ??1Class` (b9 imm32 e9 rel32), its own address pushed and
+    #     handed to `atexit` (`push $thunk ; call`, rule 3). When every
+    #     other caller inlined the destructor, that jmp is its only
+    #     reference, and the 10-byte thunk and the destructor merged into
+    #     one row matching neither COMDAT: lithtech.exe 0x50a0c0 (27 bytes;
+    #     ~CScreenGlowMgr at 0x50a0d0, `add ecx,0x220 ; jmp
+    #     ~CRenderStyleMap`), 0x509790 -> ~CPixelShaderMgr 0x509620 (until
+    #     now an extent split), server.dll 0x100135f2 (15 bytes; the
+    #     ltmodule database's 5-byte shutdown destructor at 0x100135fc,
+    #     behind a `jmp $+5`). Only a pushed address that is then called
+    #     with, whose immediate is a data address (not code).
+    for va in registered:
+        off = va - tlo
+        if 0 <= off < len(text) - 10 and text[off] == 0xB9 \
+                and text[off + 5] == 0xE9 \
+                and not tlo <= struct.unpack_from("<I", text, off + 1)[0] < thi:
+            add(tlo + off + 10 + struct.unpack_from("<i", text, off + 6)[0],
+                "thunk")
 
     # 5. exports
     for va, nm in img.exports().items():
@@ -396,7 +511,7 @@ def main():
     tally = Counter(src.values())
     print(f"{img.path}: .text {tlo:#x}-{thi:#x} ({thi-tlo} bytes)")
     print(f"functions enumerated : {len(starts)}")
-    for k in ("call", "ptr", "cb", "setup", "init", "export", "gap"):
+    for k in ("call", "ptr", "cb", "setup", "init", "unwind", "export", "gap"):
         if tally.get(k):
             print(f"   via {k:<7}: {tally[k]}")
     print(f"bytes in functions   : {covered} / {thi-tlo}  ({100*covered/(thi-tlo):.1f}%)")
@@ -405,10 +520,13 @@ def main():
         out = sys.argv[sys.argv.index("--csv") + 1]
         exp = img.exports()
         tags = tag_functions(img, starts)
-        with open(out, "w") as f:
+        # a new file renamed over the old one: in a worktree the table may
+        # be a hard link to another tree's (tools/agentwt.sh)
+        with open(out + ".tmp", "w") as f:
             f.write("addr,size,source,name\n")
             for a in starts:
                 f.write(f"0x{a:08x},{sizes[a]},{src[a]},{exp.get(a) or tags.get(a,'')}\n")
+        os.replace(out + ".tmp", out)
         print(f"wrote {out}")
 
 

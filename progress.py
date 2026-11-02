@@ -9,7 +9,11 @@ the functions (name + byte size) and classifies our build of each as:
   near       we have the function but bytes differ (compiler-revision variance)
   small      we have the function but it is almost entirely relocations, so
              there is nothing for the oracle to anchor on (global-initializer
-             COMDATs); reconstructed, not verified
+             COMDATs), and not every relocation in it is known to name the
+             same thing in both linked images; reconstructed, not verified.
+             (One whose every relocation is -- through the address mapping
+             the identical functions prove -- is identical: VERIFYING THE
+             SMALL ONES in _rows_for_image.)
   attempted  no match and no pairing, but there is evidence the address has
              been worked on (cited in src/, or recorded in progress/*.csv)
   todo       the shipped function has no counterpart in our build yet
@@ -24,7 +28,13 @@ the functions (name + byte size) and classifies our build of each as:
   middleware inside a third-party library linked into `app` (D3DX in the
              engine): listed, not counted
   encrypted  in code the retail image keeps encrypted (`encrypted`, the
-             SecuROM pages of Lithtech.exe): listed, not counted
+             SecuROM pages of Lithtech.exe): listed, not counted. Also
+             (ours) a function the target's `unreadable` names: its
+             shipped counterpart is in those pages, so it is neither
+             placed nor unplaced. With the target's `readable` (a copy of
+             the image with those pages filled in from another build of
+             the same code), the pages are read from it, so functions of
+             ours are placed there; the rows stay `encrypted`
 
 Coverage is the pair of counts summary.json carries per target: UNWRITTEN
 (todo + attempted: shipped functions with nothing of ours placed at them)
@@ -56,6 +66,7 @@ tools/ratchet.py compares those with the recorded baseline in progress/.
 Usage:
   progress.py [--nears[=target]]
               [--todo|--attempted|--near|--small|--unplaced|--unlinked|--driver[=target]]
+              [--refuted[=target]]
 
 --nears prints the near-match worklist instead of the summary: one line per
 paired function with the shipped address, both sizes and the byte delta,
@@ -85,6 +96,13 @@ PLACED_SYMS = {}
 # shape): (label, shipped address) -> "module:symbol". Weaker evidence
 # than PLACED_SYMS, so kept apart.
 SMALL_SYMS = {}
+# The small functions whose relocated operands, compared through the
+# address mapping the identical functions prove, name something else at
+# their placement: (label, shipped address, ours, offset, our operand,
+# the symbol of ours it is, the shipped address it maps to or None (the
+# shipped operand is another of ours), the shipped operand). Real
+# differences, or the wrong placement; `--refuted` lists them.
+SMALL_REFUTED = []
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from objdiff import parse_obj  # noqa: E402
@@ -573,24 +591,24 @@ def _load_objs(objs, icl=False):
     dict silently drops all but the last -- which loses whole initializer
     groups from the count. A library member's module is `lib(member)`, as
     the map names it."""
-    funcs, unpadded, from_lib = {}, {}, set()
+    funcs, unpadded, from_lib, kinds = {}, {}, set(), {}
     scored_libs = {l.lower() for l, _p in LIBS}
 
     def add(mod, data, lib_scored):
-        for k, v in parse_obj_masked(data).items():
+        rk = {}
+        for k, v in parse_obj_masked(data, rk).items():
             # instantiation drivers exist only to make VC6 emit template
             # COMDATs; they are ours, not Monolith's, and must neither score
             # nor pair
             if "ForceInstantiation" in k:
                 continue
-            # ??_H / ??_I are the vector constructor and destructor
-            # iterators VC6 emits per object as a by-product of `new T[n]`
-            # and `delete [] p`. With exceptions off it expands the loop
-            # inline and never references them, so the linker drops them --
-            # they are the compiler's code either way, not reconstructed
-            # source, and scoring them counts a phantom against us.
-            if k.startswith("??_H") or k.startswith("??_I"):
-                continue
+            # ??_H / ??_I, the vector constructor and destructor iterators
+            # VC6 emits per object for `new T[n]` and `delete [] p`, are
+            # scored like any function. Where the loop is expanded inline
+            # nothing references them and the linker drops them, so they
+            # are `unlinked` and count for nothing; where they are called
+            # (lithtech.exe's 0x401000 and 0x404920, six and two callers)
+            # the shipped image has them and so does our link.
             key = "%s:%s" % (mod, k)
             if key in funcs:
                 print("progress.py: %s is in two of the link's inputs; "
@@ -607,6 +625,7 @@ def _load_objs(objs, icl=False):
                 if body != code:
                     unpadded[key] = (body, {i for i in mask if i < len(body)})
             funcs[key] = v
+            kinds[key] = rk.get(k, {})
             if lib_scored:
                 from_lib.add(key)
 
@@ -621,7 +640,7 @@ def _load_objs(objs, icl=False):
                         open(m, "rb").read(), stem.lower() in scored_libs)
         else:
             add(os.path.basename(o), open(q, "rb").read(), False)
-    return funcs, unpadded, from_lib
+    return funcs, unpadded, from_lib, kinds
 
 
 def _restore_iat_calls(tgt, text, tva):
@@ -646,6 +665,68 @@ def _restore_iat_calls(tgt, text, tva):
     return bytes(t)
 
 
+def _resolve_overlaps(label, matched, placed, start_set, funcs, all_hits,
+                      unpadded, find, text, tva):
+    """Drop the matches that intersect a better one (see _rows_for_image),
+    re-placing the dropped functions at a free hit where they have one."""
+    def rank(a):
+        n = PLACED_SYMS.get((label, a))
+        return (0 if n in placed else 1 if a in start_set else 2,
+                -matched[a], a)
+
+    # A shared tail first: two matches at function starts (or placed by
+    # name) where the second starts inside the first and runs past its end
+    # are both functions. VC7.1 lays a catch block's funclet out so that
+    # its `push 0; push 0; call _CxxThrowException` is also where the next
+    # funclet begins, and our object's label ends the first one past it.
+    # The first is counted up to where the second starts, not dropped.
+    good = sorted(a for a in matched if rank(a)[0] < 2)
+    for a, b in zip(good, good[1:]):
+        if a < b < a + matched[a] < b + matched[b]:
+            matched[a] = b - a
+
+    taken = []                  # sorted [(start, end)]
+
+    def clear(a, n):
+        i = bisect.bisect_right(taken, (a, 1 << 62))
+        if i and taken[i - 1][1] > a:
+            return False
+        return not (i < len(taken) and taken[i][0] < a + n)
+
+    dropped = []
+    debug = os.environ.get("PROGRESS_DEBUG_OVERLAPS")
+    for a in sorted(matched, key=rank):
+        if clear(a, matched[a]):
+            bisect.insort(taken, (a, a + matched[a]))
+        else:
+            if debug:
+                i = bisect.bisect_right(taken, (a, 1 << 62))
+                near = taken[max(0, i - 1):i + 1]
+                print(f"  {label}: drop 0x{a:x}+{matched[a]} "
+                      f"{PLACED_SYMS.get((label, a))} rank {rank(a)[:1]} for "
+                      + ", ".join(f"0x{x:x}-0x{y:x} {PLACED_SYMS.get((label, x))}"
+                                  for x, y in near), file=sys.stderr)
+            dropped.append((a, PLACED_SYMS.pop((label, a), None)))
+    for a, _n in dropped:
+        del matched[a]
+    for a, n in dropped:
+        if n is None or n not in funcs:
+            continue
+        code, mask = funcs[n]
+        hits = all_hits.get(n) or []
+        if n in unpadded and not list(find(text, tva, code, mask)):
+            code, mask = unpadded[n]
+        for h in sorted(hits, key=lambda h: (h not in start_set, h)):
+            if h not in matched and clear(h, len(code)):
+                matched[h] = len(code)
+                PLACED_SYMS[(label, h)] = n
+                bisect.insort(taken, (h, h + len(code)))
+                break
+    if dropped:
+        print(f"  {label}: {len(dropped)} match(es) dropped for overlapping "
+              f"a better one", file=sys.stderr)
+
+
 def _rows_for_image(tgt, objs, mapfile, linked_path):
     """A PE image under reconstruction (exe or dll, no symbols).
 
@@ -657,12 +738,49 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     label = tgt["label"]
     icl = bool(tgt.get("icl"))
     p = os.path.join(REPO, tgt["shipped"])
+    # A target's `readable`: a copy of the shipped image whose `encrypted`
+    # pages are filled in from another build of the same code (a demo's
+    # unprotected engine, tools/demoimports.py plain). The image is read
+    # and enumerated from it, so functions of ours whose counterparts lie
+    # in those pages can be placed there; the rows stay `encrypted`
+    # (region()), listed and not counted. The project's build makes it
+    # before scoring; without it the target scores as before.
+    readable = bool(tgt.get("readable")) and \
+        os.path.exists(os.path.join(REPO, tgt["readable"]))
+    if readable:
+        p = os.path.join(REPO, tgt["readable"])
     pe = Pe(p)
     tva, tvs, trp = pe.secs[".text"]
     text = _restore_iat_calls(tgt, pe.d[trp : trp + tvs], tva)
     img, starts, sizes = _enum_with_sizes(p, label)
 
-    funcs, unpadded, from_lib = _load_objs(objs, icl)
+    funcs, unpadded, from_lib, rkinds = _load_objs(objs, icl)
+
+    # A scoring driver (DRIVER_OBJS) exists in no shipped image: the inline
+    # and template functions it makes the compiler emit are real candidates,
+    # but its own per-object artifacts -- the `_$E` initializers and
+    # ??__E/??__F thunks of its globals -- are not, and left in they match
+    # by coincidence (nolfsrc's sdkforce.obj `_$E46` was credited with 71
+    # bytes inside sm_ResetProfileCounters). Dropped before any placement.
+    for n in [n for n in funcs if n not in from_lib and
+              n.split(":", 1)[0].lower() in DRIVER_OBJS and
+              re.match(r"_?\$E\d|\?\?__[EF]", n.split(":", 1)[-1])]:
+        funcs.pop(n)
+        unpadded.pop(n, None)
+
+    # A target's `unreadable` (a regex on `module:symbol`) names functions
+    # of ours whose shipped counterparts lie where the image cannot be
+    # read, its `encrypted` pages (a copy protection's encrypted exception
+    # funclets, or a library linked among them): set aside before any
+    # placement, so they neither pair with readable code of their size nor
+    # count as unplaced. Listed below as `encrypted`, once each, when our
+    # own link has them.
+    unreadable = {}
+    if tgt.get("unreadable"):
+        for n in sorted(funcs):
+            if n not in from_lib and re.search(tgt["unreadable"], n):
+                unreadable[n] = len(funcs.pop(n)[0])
+                unpadded.pop(n, None)
 
     # Several of our functions compile to identical code, and the shipped
     # linker folded some of those into one address while emitting others
@@ -708,22 +826,45 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
                 matched[a] = len(c)
                 PLACED_SYMS[(label, a)] = n
                 placed.add(n)
+    # Every placeable function's hits, found once. An object, like a
+    # library, is linked as one block, so its functions found at a single
+    # address anchor it: a function of it with several hits (identical
+    # initializer and destructor COMDATs recur all over an image) takes the
+    # free one nearest those, not whichever comes first in .text.
+    all_hits = {}
     for n, (code, mask) in sorted(funcs.items()):
-        if n in placed:
-            continue
-        if len(code) - len(mask) < 8:
-            tiny[n] = (code, mask)
+        if n in placed or len(code) - len(mask) < 8:
             continue
         hits = lib_hits[n] if n in lib_hits else list(find(text, tva, code, mask))
         if not hits and n in unpadded:
             # icl pads a COMDAT with multi-byte lea-nops; where the shipped
             # image has different bytes after the function the padded body
             # is found nowhere. Try the body without it.
-            code, mask = unpadded[n]
-            if len(code) - len(mask) >= 8:
-                hits = list(find(text, tva, code, mask))
+            ucode, umask = unpadded[n]
+            if len(ucode) - len(umask) >= 8:
+                hits = list(find(text, tva, ucode, umask))
+        all_hits[n] = hits
+    def _obj_local(n):
+        # Template instances and deleting destructors are emitted by every
+        # object that uses them and the linker keeps any one copy: they are
+        # not where their object is.
+        sym = n.split(":", 1)[-1]
+        return "?$" not in sym and not sym.startswith(("??_G", "??_E", "??_D"))
+    obj_anchors = {}
+    for n, hits in all_hits.items():
+        if n not in from_lib and len(hits) == 1 and _obj_local(n):
+            obj_anchors.setdefault(_lib_of(n), []).append(hits[0])
+    for n, (code, mask) in sorted(funcs.items()):
+        if n in placed:
+            continue
+        if len(code) - len(mask) < 8:
+            tiny[n] = (code, mask)
+            continue
+        hits = all_hits.get(n, [])
         if not hits:
             continue
+        if n in unpadded and not list(find(text, tva, code, mask)):
+            code, mask = unpadded[n]
         fresh = [h for h in hits if h not in matched]
         # A hit that is not an enumerated function start is a byte-run
         # inside some other function (a short body's masked shape recurring
@@ -732,12 +873,28 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             at_start = [h for h in fresh if h in start_set]
             if at_start:
                 fresh = at_start
-        anc = anchors.get(_lib_of(n)) if n in from_lib else None
+        if n in from_lib:
+            anc = anchors.get(_lib_of(n))
+        else:
+            anc = obj_anchors.get(_lib_of(n)) if _obj_local(n) else None
         if anc and len(fresh) > 1:
             fresh.sort(key=lambda h: min(abs(h - a) for a in anc))
         at = (fresh or hits)[0]
         matched[at] = len(code)
         PLACED_SYMS[(label, at)] = n
+
+    # Matches may not overlap. find() admits a hit at any offset, so a short
+    # body's masked shape can recur inside a longer function another of ours
+    # already matched in full (an 8-byte HostSession wrapper inside
+    # CClassMgr::Init): both cannot be shipped functions, and counting both
+    # counts those bytes twice. Each byte of the image is credited once:
+    # matches are taken in order of evidence -- placed at the address its
+    # name gives, then at an enumerated function start, then anywhere --
+    # longest first, and one that intersects a match already taken is
+    # dropped (but see the shared tail in _resolve_overlaps); its function
+    # then takes its next free hit that intersects nothing, if it has one.
+    _resolve_overlaps(label, matched, placed, start_set, funcs, all_hits,
+                      unpadded, find, text, tva)
 
     # A library linked into an image is one contiguous block of it, so a
     # library function's hit strictly inside another matched function is a
@@ -861,8 +1018,23 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     # a shape match is exact, while one with a relocation (`mov eax, <addr>;
     # ret`) fits every sibling of its shape. In name order the second kind
     # could take the address of the first.
+    # A copy our link did not keep (a COMDAT duplicate, or one /OPT:ICF
+    # folded into another object's identical function) is not in our image:
+    # the copies the map names are tried first, so that what is placed
+    # where can be verified through our image. Which object's copy the
+    # linker keeps for a folded group changes with any function added to
+    # or removed from the link.
+    _lay = {(m.lower(), s) for (m, s) in (_our_layout(mapfile) or {})}
+
+    def _linked(n):
+        if not _lay or ":" not in n:
+            return True
+        mod, sym = n.split(":", 1)
+        return (mod.lower(), sym) in _lay
+
     for n, (code, mask) in sorted(tiny.items(),
-                                  key=lambda kv: (len(kv[1][1]) > 0, kv[0])):
+                                  key=lambda kv: (len(kv[1][1]) > 0,
+                                                  not _linked(kv[0]), kv[0])):
         # a COMDAT is padded out to alignment; the function is what precedes it
         end = len(code)
         while end > 0 and code[end - 1] in (0x90, 0xCC):
@@ -1041,6 +1213,10 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             a = layout.get((mod.lower(), sym))
             if a is not None:
                 ours_at[n] = a
+        for n in unreadable:
+            mod, sym = n.split(":", 1)
+            if (mod.lower(), sym) in layout:
+                ours_at[n] = layout[(mod.lower(), sym)]
     placed_at = {}     # symbol -> shipped address
     for (lb, a), n in PLACED_SYMS.items():
         if lb == label and a in matched:
@@ -1051,6 +1227,487 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
     for a, n in paired.items():
         placed_at[n] = a
     our_placed = {ours_at[n] for n in placed_at if n in ours_at} | linked_ours
+
+    # BY REFERENCE. An identical function is the same code in both images,
+    # so every relocated operand in it names the same thing in both: the
+    # dword our link wrote there is a symbol's address in our image, and the
+    # shipped dword at the same offset is that symbol's shipped address (a
+    # rel32 call or jump: the target the displacement reaches). That pairs
+    # functions whose bytes cannot: a callee that compiled to twice or half
+    # the shipped size, or a one-line wrapper among a dozen of the same
+    # shape. A reference to a vtable pairs it with the shipped table, and the
+    # two tables then pair slot for slot -- a slot's position is fixed by the
+    # class declaration, whatever its function compiled to. Evidence that
+    # disagrees with itself (one of our addresses seen with two shipped
+    # ones, or the reverse) is dropped. A function placed this way is
+    # "near"; it takes a shipped address no function is identical or small
+    # at, and displaces a near pairing only when the function paired there
+    # has no reference saying so.
+    by_ref = 0
+    our_img = built_image(tgt) if ours_at else None
+    if our_img:
+        ope = Pe(os.path.join(REPO, our_img))
+        otva, otvs, otrp = ope.secs[".text"]
+
+        def dword(p, va):
+            o = p.va2off(va)
+            return struct.unpack_from("<I", p.d, o)[0] \
+                if o is not None and o + 4 <= len(p.d) else None
+
+        seen_o, seen_s = {}, {}
+        for n, sa in placed_at.items():
+            if sa not in matched or n not in ours_at:
+                continue
+            oa, (code, mask) = ours_at[n], funcs[n]
+            i = 0
+            while i + 4 <= len(code):
+                if not all(j in mask for j in range(i, i + 4)):
+                    i += 1
+                    continue
+                ov, sv = dword(ope, oa + i), dword(pe, sa + i)
+                if ov is None or sv is None:
+                    break
+                op = code[i - 1] if i else None
+                if op in (0xE8, 0xE9) or (i >= 2 and code[i - 2] == 0x0F
+                                          and op is not None
+                                          and 0x80 <= op <= 0x8F):
+                    ov = (oa + i + 4 + ov) & 0xFFFFFFFF
+                    sv = (sa + i + 4 + sv) & 0xFFFFFFFF
+                seen_o.setdefault(ov, set()).add(sv)
+                seen_s.setdefault(sv, set()).add(ov)
+                i += 4
+        ref = {ov: next(iter(svs)) for ov, svs in seen_o.items()
+               if len(svs) == 1 and len(seen_s[next(iter(svs))]) == 1}
+
+        at_ours = {}
+        for n, a in ours_at.items():
+            at_ours.setdefault(a, []).append(n)
+        start_ok = set(starts) | set(matched)
+        claimed_by = {}           # shipped address -> symbol, from evidence
+        claimed_names = set()
+
+        def evidence(oa, sa):
+            if sa not in start_ok or not (in_app(tgt, sa) or _in(
+                    tgt.get("compiler_output") or (), sa)):
+                return
+            if sa in matched or sa in small:
+                return
+            names = [n for n in at_ours.get(oa, ()) if n not in from_lib]
+            if not names:
+                return
+            if any(n in placed_at and placed_at[n] in matched or
+                   n in placed_at and placed_at[n] in small for n in names):
+                return
+            n = sorted(names)[0]
+            if sa in claimed_by or n in claimed_names:
+                return
+            # a name that says where it ships (sub_<addr>, own_symbols,
+            # own_names) outranks a reference: look-alike callers, paired
+            # among themselves by position, refer to each other's callees
+            pin = _own_addr(tgt, n, funcs)
+            if pin is not None and pin != sa:
+                return
+            claimed_by[sa] = n
+            claimed_names.add(n)
+
+        for ov, sv in sorted(ref.items()):
+            if otva <= ov < otva + otvs:
+                evidence(ov, sv)
+        # the vtables: our ??_7 symbols' extents from the map, slot by slot
+        vt = []
+        if mapfile:
+            allsyms = []
+            for line in open(os.path.join(REPO, mapfile), errors="replace"):
+                p = line.split()
+                if len(p) >= 4 and re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{8}",
+                                                p[0]) and \
+                        re.fullmatch(r"[0-9a-fA-F]{8}", p[2]):
+                    allsyms.append((int(p[2], 16), p[1]))
+            allsyms.sort()
+            addrs = [a for a, _s in allsyms]
+            # A table nothing identical refers to (its constructor inlined
+            # into an initializer, say) is found by its slots instead: the
+            # shipped table is where the functions of ours already placed
+            # identical stand at the same slots -- at least two of them, and
+            # more agreeing than disagreeing.
+            where_s = None
+            for a, s in allsyms:
+                if not s.startswith("??_7"):
+                    continue
+                j = bisect.bisect_right(addrs, a)
+                end = addrs[j] if j < len(addrs) else a + 4 * 4096
+                nslots = (end - a) // 4
+                if a in ref:
+                    vt.append((a, ref[a], nslots))
+                    continue
+                if where_s is None:
+                    where_s = {}
+                    for sname, (sva, svs, srp) in pe.secs.items():
+                        if sname == ".text":
+                            continue
+                        raw = pe.rawsz.get(sname, svs)
+                        for o in range(0, min(svs, raw) - 3, 4):
+                            v = struct.unpack_from("<I", pe.d, srp + o)[0]
+                            if tva <= v < tva + tvs:
+                                where_s.setdefault(v, []).append(sva + o)
+                slot_ident = []
+                for k in range(nslots):
+                    ov = dword(ope, a + 4 * k)
+                    if ov is None or not (otva <= ov < otva + otvs):
+                        break
+                    sas = {placed_at[n] for n in at_ours.get(ov, ())
+                           if n in placed_at and placed_at[n] in matched}
+                    if len(sas) == 1:
+                        slot_ident.append((k, sas.pop()))
+                votes = {}
+                for k, sa in slot_ident:
+                    for p in where_s.get(sa, ()):
+                        votes[p - 4 * k] = votes.get(p - 4 * k, 0) + 1
+                if not votes:
+                    continue
+                base = max(sorted(votes), key=lambda b: votes[b])
+                bad = sum(1 for k, sa in slot_ident
+                          if dword(pe, base + 4 * k) != sa)
+                if votes[base] >= 2 and votes[base] > bad:
+                    vt.append((a, base, nslots))
+        for oa, sa, nslots in vt:
+            for k in range(nslots):
+                ov, sv = dword(ope, oa + 4 * k), dword(pe, sa + 4 * k)
+                if ov is None or sv is None or \
+                        not (otva <= ov < otva + otvs) or \
+                        not (tva <= sv < tva + tvs):
+                    break
+                evidence(ov, sv)
+        for sa, n in sorted(claimed_by.items()):
+            if n in placed_at and placed_at[n] == sa:
+                continue
+            old = paired.get(sa)
+            if old is not None and old in claimed_names:
+                continue
+            if old is not None:
+                del paired[sa]
+                placed_at.pop(old, None)
+            if n in placed_at:
+                b = placed_at.pop(n)
+                if paired.get(b) == n:
+                    del paired[b]
+            NEAR_PAIRS[:] = [r for r in NEAR_PAIRS if not (
+                r[0] == label and (r[1] == sa or r[3] == n))]
+            paired[sa] = n
+            placed_at[n] = sa
+            NEAR_PAIRS.append((label, sa, sizes.get(sa, 0), n,
+                               len(bytes(funcs[n][0]).rstrip(b"\x90\xcc"))))
+            by_ref += 1
+        our_placed = {ours_at[n] for n in placed_at if n in ours_at} | \
+            linked_ours
+        if by_ref:
+            print(f"  {label}: placed {by_ref} by reference", file=sys.stderr)
+
+        # VERIFYING THE SMALL ONES. A `small` function's bytes are almost
+        # all relocations, so the masked comparison says nothing -- but in
+        # the two LINKED images the relocations are resolved, and what each
+        # one names can be compared through a mapping of our addresses to
+        # the shipped ones. The mapping is built only from what is already
+        # proven: the relocated operands of the identical functions (the
+        # COFF relocation's type says what the dword is: an address, or a
+        # rel32 displacement whose target is the address), the identical
+        # functions' own addresses, the slots of the vtables those operands
+        # pair, and the import slots, which both images name. One of our
+        # addresses seen with two shipped ones, or the reverse, is a
+        # contradiction and maps nothing. A short function of ours whose
+        # unmasked bytes match a shipped function of exactly its length,
+        # and whose EVERY relocated operand maps to the shipped operand at
+        # the same offset, is identical. Its own address then maps too, so
+        # the pass repeats until nothing new is proven (an initializer
+        # thunk calls a constructor that is itself small).
+        #
+        # Where it is tried: at the shipped address its own address maps to
+        # (a call from identical code, a vtable slot), at the address the
+        # shape placed it, and, when every operand maps, at any shipped
+        # function of its length -- a shape recurring a dozen times was
+        # placed at an arbitrary one of them, and the operands say which.
+        # A function placed small that verifies nowhere is REFUTED if one
+        # of its operands at its placement maps elsewhere (the shipped
+        # operand is a different thing of ours, or ours names something
+        # else in the shipped image): a real difference, or the wrong
+        # placement. Otherwise it stays small: not everything it names is
+        # known.
+        s_lo, s_hi = tva, tva + len(text)
+        # (an image scored twice, for its remainders: the second run's)
+        SMALL_REFUTED[:] = [r for r in SMALL_REFUTED if r[0] != label]
+
+        def operand(which, fa, off, kind):
+            if which is pe and s_lo <= fa + off < s_hi - 3:
+                v = struct.unpack_from("<I", text, fa + off - tva)[0]
+            else:
+                v = dword(which, fa + off)
+            if v is None:
+                return None
+            if kind == 0x14:                    # REL32
+                return (fa + off + 4 + v) & 0xFFFFFFFF
+            if kind == 0x06:                    # DIR32
+                return v
+            if kind == 0x07:                    # DIR32NB, an RVA
+                return (v + which.base) & 0xFFFFFFFF
+            return None
+
+        def blen(n):
+            code = funcs[n][0]
+            end = len(code)
+            while end > 0 and code[end - 1] in (0x90, 0xCC):
+                end -= 1
+            return len(strip_pad(bytes(code[:end]))) if icl else end
+
+        def imports_by_name(p):
+            out, dup = {}, set()
+            for slot, nm in p.imports().items():
+                if not nm or nm.endswith("…") or nm.endswith("!None"):
+                    continue
+                if nm in out:
+                    dup.add(nm)
+                out[nm] = slot
+            return {k: v for k, v in out.items() if k not in dup}
+
+        o_imp, s_imp = imports_by_name(ope), imports_by_name(pe)
+        verified = {}          # shipped address -> ours, verified here
+        ident_n = {n: sa for n, sa in placed_at.items()
+                   if sa in matched and n in ours_at}
+
+        def mapping():
+            fwd, rev = {}, {}
+
+            def note(ov, sv):
+                fwd.setdefault(ov, set()).add(sv)
+                rev.setdefault(sv, set()).add(ov)
+
+            for n, sa in ident_n.items():
+                oa = ours_at[n]
+                note(oa, sa)
+                for off, kind in rkinds.get(n, {}).items():
+                    ov = operand(ope, oa, off, kind)
+                    sv = operand(pe, sa, off, kind)
+                    if ov is not None and sv is not None:
+                        note(ov, sv)
+            for nm, slot in o_imp.items():
+                if nm in s_imp:
+                    note(slot, s_imp[nm])
+
+            def unique(f, r):
+                return {o: next(iter(ss)) for o, ss in f.items()
+                        if len(ss) == 1 and len(r[next(iter(ss))]) == 1}
+            m = unique(fwd, rev)
+            # the vtables the operands pair, slot by slot
+            for oa, sa, nslots in vt:
+                if m.get(oa) != sa:
+                    continue
+                for k in range(nslots):
+                    ov, sv = dword(ope, oa + 4 * k), dword(pe, sa + 4 * k)
+                    if ov is None or sv is None or \
+                            not (otva <= ov < otva + otvs) or \
+                            not (tva <= sv < tva + tvs):
+                        break
+                    note(ov, sv)
+            m = unique(fwd, rev)
+            return m, set(m.values())
+
+        def check(n, sa, m, seen_s):
+            """'ok', 'refuted' (with the offset), 'unmapped' or 'bytes'."""
+            if not fits_at(n, sa):
+                return "bytes", None
+            end = blen(n)
+            oa, res = ours_at[n], ("ok", None)
+            for off, kind in sorted(rkinds.get(n, {}).items()):
+                if off >= end:
+                    continue
+                ov = operand(ope, oa, off, kind)
+                sv = operand(pe, sa, off, kind)
+                if ov is None or sv is None:
+                    res = ("unmapped", None)
+                    continue
+                if ov in m:
+                    if m[ov] != sv:
+                        return "refuted", (off, ov, m[ov], sv)
+                elif sv in seen_s:
+                    return "refuted", (off, ov, None, sv)
+                else:
+                    res = ("unmapped", None)
+            return res
+
+        holder = {a: n for (lb, a), n in SMALL_SYMS.items()
+                  if lb == label and a in small}
+        small_at = {n: a for a, n in holder.items()}
+        tiny_ours = sorted(n for n in tiny if n in ours_at and n not in from_lib)
+        by_len = {}
+        for a in starts:
+            if in_app(tgt, a) and a not in matched and sizes.get(a, 0) > 0:
+                body = text[a - tva:a - tva + sizes[a]]
+                by_len.setdefault(len(strip_pad(bytes(body))) if icl
+                                  else sizes[a], []).append(a)
+        def fits_at(n, a):
+            """n's shape at a, as the small placement above requires."""
+            code, mask = funcs[n]
+            end = blen(n)
+            if icl:
+                body = strip_pad(bytes(text[a - tva:a - tva + sizes.get(a, 0)]))
+                if len(body) != end:
+                    return False
+            elif sizes.get(a) != end:
+                return False
+            return all(i in mask or text[a - tva + i] == code[i]
+                       for i in range(end))
+
+        def refill(a):
+            """An address a verified function moved away from: given, by
+            shape, to a short function of ours placed nowhere yet."""
+            # (any of them, as the shape placement above takes)
+            for n in sorted(tiny):
+                if n not in placed_small and n not in placed_at and \
+                        n not in from_lib and fits_at(n, a):
+                    holder[a], small_at[n] = n, a
+                    small.add(a)
+                    SMALL_SYMS[(label, a)] = n
+                    placed_small.add(n)
+                    placed_at[n] = a
+                    return
+
+        moved = 0
+        while True:
+            m, seen_s = mapping()
+            new = 0
+            for n in tiny_ours:
+                if n in ident_n:
+                    continue
+                oa = ours_at[n]
+                cand = []
+                if oa in m:
+                    cand.append(m[oa])
+                if n in small_at:
+                    cand.append(small_at[n])
+                rel = rkinds.get(n, {})
+                if rel and all(operand(ope, oa, o, k) in m
+                               for o, k in rel.items()):
+                    cand += by_len.get(blen(n), [])
+                for sa in dict.fromkeys(cand):
+                    if sa in matched or not in_app(tgt, sa):
+                        continue
+                    if paired.get(sa, n) != n:
+                        continue
+                    if check(n, sa, m, seen_s)[0] != "ok":
+                        continue
+                    # proven: identical at sa
+                    s0 = small_at.pop(n, None)
+                    if s0 is not None and s0 != sa:
+                        moved += 1
+                        # what was at sa takes n's old address if its
+                        # shape fits there, else it is placed nowhere
+                        n2 = holder.pop(sa, None)
+                        del holder[s0]
+                        small.discard(s0)
+                        SMALL_SYMS.pop((label, s0), None)
+                        if n2 is not None:
+                            small_at.pop(n2, None)
+                            if fits_at(n2, s0):
+                                holder[s0], small_at[n2] = n2, s0
+                                small.add(s0)
+                                SMALL_SYMS[(label, s0)] = n2
+                                placed_at[n2] = s0
+                            else:
+                                placed_small.discard(n2)
+                                placed_at.pop(n2, None)
+                                refill(s0)
+                        else:
+                            refill(s0)
+                    elif s0 is None and sa in holder:
+                        n2 = holder.pop(sa)
+                        small_at.pop(n2, None)
+                        placed_small.discard(n2)
+                        placed_at.pop(n2, None)
+                    else:
+                        holder.pop(sa, None)
+                    small.discard(sa)
+                    SMALL_SYMS.pop((label, sa), None)
+                    if paired.get(sa) == n:
+                        del paired[sa]
+                        NEAR_PAIRS[:] = [r for r in NEAR_PAIRS
+                                         if not (r[0] == label and r[1] == sa)]
+                    matched[sa] = sizes[sa]
+                    PLACED_SYMS[(label, sa)] = n
+                    placed_at[n] = sa
+                    placed_small.add(n)
+                    ident_n[n] = sa
+                    verified[sa] = n
+                    new += 1
+                    break
+            if not new:
+                break
+        # What is left was placed by shape alone, and a shape that recurs
+        # (an initializer thunk, a one-store destructor) was given an
+        # arbitrary one of its addresses. Where an operand that maps says
+        # that address is another function's, move the function to an
+        # address of its shape where nothing that maps disagrees: a free
+        # one, or one whose own holder is refuted there and fits here.
+        # Still small -- not everything it names is known -- but no longer
+        # refuted by what is.
+        def state(n, a):
+            return check(n, a, m, seen_s)[0]
+
+        def put(n, a):
+            holder[a], small_at[n] = n, a
+            small.add(a)
+            SMALL_SYMS[(label, a)] = n
+            placed_at[n] = a
+
+        reseated = 0
+        for _round in range(4):
+            again = 0
+            for n, s0 in sorted(small_at.items(), key=lambda kv: kv[1]):
+                if small_at.get(n) != s0 or n not in ours_at or \
+                        state(n, s0) != "refuted":
+                    continue
+                for a in by_len.get(blen(n), ()):
+                    if a == s0 or a in matched or paired.get(a, n) != n or \
+                            state(n, a) != "unmapped":
+                        continue
+                    h = holder.get(a)
+                    if h is None:
+                        del holder[s0]
+                        small.discard(s0)
+                        SMALL_SYMS.pop((label, s0), None)
+                        put(n, a)
+                        refill(s0)
+                    elif h in ours_at and state(h, a) == "refuted" and \
+                            fits_at(h, s0):
+                        put(n, a)
+                        put(h, s0)
+                    else:
+                        continue
+                    again += 1
+                    break
+            reseated += again
+            if not again:
+                break
+
+        refuted = 0
+        for n, s0 in sorted(small_at.items(), key=lambda kv: kv[1]):
+            if n not in ours_at:
+                # (a copy our own link did not keep: nothing to read)
+                continue
+            st, why = check(n, s0, m, seen_s)
+            if st == "refuted":
+                refuted += 1
+                off, ov, want_s, got_s = why
+                j = bisect.bisect_right(addrs, ov) - 1
+                what = "%s+0x%x" % (allsyms[j][1], ov - allsyms[j][0]) \
+                    if j >= 0 else "?"
+                SMALL_REFUTED.append((label, s0, n, off, ov,
+                                      what.replace("+0x0", ""), want_s, got_s))
+        print(f"  {label}: small verified by relocation {len(verified)} "
+              f"({moved} moved to the address their operands name), "
+              f"refuted {refuted}, unmapped {len(small_at) - refuted} "
+              f"({reseated} moved off an address an operand refuted)",
+              file=sys.stderr)
+        our_placed = {ours_at[n] for n in placed_at if n in ours_at} | \
+            linked_ours
 
     # An inline function from a header is a COMDAT in every object that
     # includes it, and every copy is the same function: the linker keeps one.
@@ -1107,11 +1764,33 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             k = prev[k]
         return out[::-1]
 
+    # A target's `compiler_output` ranges hold the shipped image's
+    # initializers, terminators and exception funclets: ours of those
+    # (by their compiler-given names) are placed there and nowhere else,
+    # and nothing else of ours is placed there.
+    co_ranges = tgt.get("compiler_output") or ()
+
+    def co_sym(n):
+        sym = n.split(":", 1)[-1]
+        return bool(re.match(r"_?\$E\d|\?\?__[EF]|__ehhandler\$", sym))
+
+    def co_long(n):
+        # (the short ones are not placed there at all: those are a count of
+        # shapes, below)
+        code, mask = funcs[n]
+        return co_sym(n) and len(code) - len(mask) >= 8
+
+    def fits(n, a):
+        if not co_ranges:
+            return True
+        return co_long(n) if _in(co_ranges, a) else not co_sym(n)
+
     if ours_at:
-        app = [r for r in tgt.get("app", ())]
+        app = [r for r in tgt.get("app", ())] + list(co_ranges)
         lo = min(r[0] for r in app) if app else img.tlo
         hi = max(r[1] for r in app) if app else img.thi
-        free = {a for a in starts if in_app(tgt, a)
+        free = {a for a in starts
+                if (in_app(tgt, a) or _in(co_ranges, a))
                 and a not in matched and a not in paired
                 and a not in small and sizes.get(a, 0) > 0}
         joined = {"name": 0, "object": 0, "image": 0}
@@ -1140,7 +1819,7 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             if not unplaced_sym(n):
                 continue
             a = _own_addr(tgt, n, funcs)
-            if a in free:
+            if a in free and fits(n, a):
                 place(n, a, "name")
 
         def mine_now(keep=lambda n: True):
@@ -1156,10 +1835,14 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             u = [(n, body_len(funcs[n][0])) for o, n in mine
                  if o1 < o < o2 and n not in placed_at]
             w = [(a, sizes[a]) for a in sorted(free) if r1 < a < r2]
-            if not u or not w or len(u) * len(w) > 250000:
-                return
-            for n, a in _align(u, w):
-                place(n, a, how)
+            for co in ((False, True) if co_ranges else (None,)):
+                uu = [x for x in u if co is None or
+                      (co_long(x[0]) if co else not co_sym(x[0]))]
+                ww = [x for x in w if co is None or _in(co_ranges, x[0]) == co]
+                if not uu or not ww or len(uu) * len(ww) > 250000:
+                    continue
+                for n, a in _align(uu, ww):
+                    place(n, a, how)
 
         # 2. Within each object, by neighbourhood: a shipped function no one
         # is placed at, whose nearest placed neighbours (below or above) are
@@ -1185,12 +1868,36 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
         for obj, ws in sorted(cand.items()):
             us = [n for _o, n in mine_now(
                 lambda n, obj=obj: n.split(":", 1)[0] == obj)]
+            # ... but where it does, order says more than size: between
+            # two of X's placed functions whose order agrees in both
+            # images, X's unplaced ones there are aligned with the shipped
+            # ones there in order first (_align), and only what that leaves
+            # is matched by size.
+            # (anchors: X's own functions, not the per-object initializer
+            # names nor the COMDATs any object may supply, which are placed
+            # by shape wherever one fits)
+            mine_o = sorted((ours_at[n], n) for n in us if n in ours_at)
+            ch = [(-1, lo)] + chain_of(
+                (ours_at[n], a) for n, a in placed_at.items()
+                if n in ours_at and n.split(":", 1)[0] == obj
+                and not co_sym(n) and _obj_local(n)) + [(1 << 40, hi)]
+            for (o1, r1), (o2, r2) in zip(ch, ch[1:]):
+                u = [(n, body_len(funcs[n][0])) for o, n in mine_o
+                     if o1 < o < o2 and n not in placed_at]
+                w = [(a, sizes[a]) for a in ws if r1 < a < r2 and a in free]
+                if not u or not w or len(u) * len(w) > 250000:
+                    continue
+                for n, a in _align(u, w):
+                    if fits(n, a):
+                        place(n, a, "object")
+            us = [n for n in us if n not in placed_at]
             pairs = []
             for n in us:
                 su = body_len(funcs[n][0])
                 for a in ws:
                     sw = sizes.get(a, 0)
-                    if su > 0 and sw > 0 and 0.5 <= su / sw <= 2:
+                    if su > 0 and sw > 0 and 0.5 <= su / sw <= 2 and \
+                            fits(n, a):
                         pairs.append((abs(math.log(su / sw)), n, a))
             for _d, n, a in sorted(pairs):
                 if n not in placed_at and a in free:
@@ -1209,6 +1916,11 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
                   f"link order", file=sys.stderr)
 
     rows = []
+    seen_unreadable = set()
+    for n, size in sorted(unreadable.items()):
+        if (not layout or n in ours_at) and fname(n) not in seen_unreadable:
+            seen_unreadable.add(fname(n))
+            rows.append((label, n, size, "encrypted"))
     # Functions we wrote that did NOT match: instruction-equivalent
     # near-matches, or code simply not linked into this image. Keyed by symbol
     # since we have no address for them.
@@ -1242,8 +1954,13 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
         for key in mine_by_shape:
             by_len.setdefault(len(key[0]), []).append(key)
         theirs_count = dict.fromkeys(mine_by_shape, 0)
+        # The short functions in a target's `compiler_output` ranges are
+        # what ours of the same shape compiled to: they count against our
+        # surplus as the image's own code does (their rows stay `crt`). So
+        # do the `encrypted` pages' when the target is `readable`.
         for a in starts:
-            if not in_app(tgt, a):
+            if not (in_app(tgt, a) or _in(co_ranges, a) or
+                    (readable and _in(tgt.get("encrypted"), a))):
                 continue
             off = a - tva
             body = text[off:off + sizes.get(a, 0)]
@@ -1304,6 +2021,19 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
             # a start whose extent is all padding: not a function
             continue
         where = region(tgt, a)
+        # The region decides first: a match outside `app` does not make an
+        # address counted. A target's `compiler_output` ranges are the one
+        # exception the target declares (its .text$x, .text$yc and .text$yd:
+        # the exception funclets, initializers and terminators the compiler
+        # made of OUR source, among the runtime's own): a row there counts
+        # where a function of ours is placed or paired, and stays `crt`
+        # otherwise. Anywhere else outside `app` -- the runtime, the import
+        # thunks, a library's tail -- nothing counts, whatever matches.
+        if where == "crt":
+            if not (_in(co_ranges, a) and (a in matched or a in paired or
+                                           a in small)):
+                rows.append((label, "sub_%x" % a, size, "crt"))
+                continue
         if where in ("encrypted", "middleware"):
             rows.append((label, "sub_%x" % a, size, where))
         elif a in matched:
@@ -1320,6 +2050,19 @@ def _rows_for_image(tgt, objs, mapfile, linked_path):
                          "attempted" if a in touched else "todo"))
         else:
             rows.append((label, "sub_%x" % a, size, "crt"))
+    # Invariant: no byte of the image is counted twice.
+    end = 0
+    over = []
+    for _l, n, size, st in rows:
+        if not n.startswith("sub_") or st in ("crt", "middleware", "encrypted"):
+            continue
+        a = int(n[4:], 16)
+        if a < end:
+            over.append(n)
+        end = max(end, a + size)
+    if over:
+        print(f"  {label}: WARNING: {len(over)} counted row(s) overlap the "
+              f"one before: {', '.join(over[:8])}", file=sys.stderr)
     return rows
 
 
@@ -1515,24 +2258,69 @@ def _touched_index(tgt):
     return out
 
 
-def score_target(tgt):
-    """(rows, our build or None) for one target."""
-    ours = built_image(tgt)
-    if tgt["kind"] == "resources":
-        return rows_for_resources(tgt, ours), ours
-    if not ours:
-        return rows_for_unbuilt(tgt), None
+def image_objs(tgt, ours):
+    """Our side of an image target: what our link of it read (its .rsp), or
+    the target's `objs` globs; less its `third_party` inputs."""
     objs = link_inputs(ours)
     if objs is None:
         objs = sorted({os.path.relpath(p, REPO) for g in tgt.get("objs", ())
                        for p in glob.glob(os.path.join(REPO, g), recursive=True)})
     skip = {s.lower() for s in tgt.get("third_party", ())}
-    objs = [o for o in objs if os.path.basename(o).lower() not in skip]
+    return [o for o in objs if os.path.basename(o).lower() not in skip]
+
+
+def score_target(tgt):
+    """(rows, our build or None) for one target."""
+    ours = built_image(tgt)
+    if tgt["kind"] == "resources":
+        return rows_for_resources(tgt, ours), ours
+    if not ours and tgt.get("partial_objs"):
+        # A build that does not link yet (talon's Processor while its
+        # sources are reconstructed module by module): score the objects
+        # it has compiled, with no map or image of ours to place them by.
+        objs = sorted({os.path.relpath(p, REPO) for g in tgt["partial_objs"]
+                       for p in glob.glob(os.path.join(REPO, g), recursive=True)})
+        if objs:
+            return rows_for_image(tgt, objs, None), None
+    if not ours:
+        return rows_for_unbuilt(tgt), None
+    objs = image_objs(tgt, ours)
     if not objs:
         sys.exit("progress.py: %s: %s has no link response file (%s.rsp) and "
                  "the target lists no objs" % (tgt["label"], ours, ours))
     linked = ours if tgt.get("linked_oracle") else None
-    return rows_for_image(tgt, objs, our_map(ours), linked), ours
+    rows = rows_for_image(tgt, objs, our_map(ours), linked)
+    if whole_image_identical(tgt, ours):
+        # The strongest evidence there is: our whole image is the retail
+        # one, but for the link's time stamps and checksum. Every function
+        # in it is identical, however little of it the masked match could
+        # prove (a short function, or one whose relocations alone differ).
+        WHOLE_IMAGE.add(tgt["label"])
+        rows = [(l, n, size, "identical" if st in ("near", "small", "todo",
+                                                    "attempted") else st)
+                for l, n, size, st in rows]
+    return rows, ours
+
+
+WHOLE_IMAGE = set()     # the labels of targets whose image is retail's
+
+
+def whole_image_identical(tgt, ours):
+    """True when our build of an image target equals the shipped image with
+    only buildcmp.py's normalisation (link time stamps, checksum, the debug
+    directory's time and signature): no address masked, nothing moved."""
+    from buildcmp import norm_pe
+    if tgt.get("readable") or tgt.get("encrypted"):
+        return False
+    with open(os.path.join(REPO, tgt["shipped"]), "rb") as f:
+        a = bytearray(f.read())
+    with open(os.path.join(REPO, ours), "rb") as f:
+        b = bytearray(f.read())
+    if len(a) != len(b):
+        return False
+    norm_pe(a)
+    norm_pe(b)
+    return a == b
 
 
 def main():
@@ -1596,6 +2384,19 @@ def main():
             print(f"{r[0]:<14} {r[1]:<16} {r[2]:>7}")
         print(f"\n{len(sel)} row(s), {sum(r[2] for r in sel)} bytes")
         return
+
+    for a in sys.argv[1:]:
+        if a == "--refuted" or a.startswith("--refuted="):
+            pick = a.split("=", 1)[1] if "=" in a else ""
+            sel = [r for r in SMALL_REFUTED if r[0].startswith(pick)]
+            for label, sa, n, off, ov, what, want_s, got_s in sel:
+                print(f"{label:<14} 0x{sa:08x} {n}\n{'':<14} +{off}: ours "
+                      f"0x{ov:08x} {what}, maps to "
+                      + (f"0x{want_s:08x}" if want_s is not None
+                         else "nothing (the shipped one is another of ours)")
+                      + f"; shipped 0x{got_s:08x}")
+            print(f"\n{len(sel)} refuted small function(s)")
+            return
 
     want = None
     for a in sys.argv[1:]:
@@ -1695,6 +2496,9 @@ def main():
     for label in order:
         line(label, targets[label],
              "" if targets[label]["started"] else "  (no build yet)")
+        if label in WHOLE_IMAGE:
+            print(f"{'':<18} (the whole image is retail's but for the link's "
+                  f"time stamps: every function identical)")
     for t in TARGETS:
         if t["kind"] == "resources":
             line(t["label"], targets[t["label"]],

@@ -27,7 +27,7 @@ Why the asymmetry exists, and why it only points one way:
 
 So Lithtech.exe is the stronger oracle for source SHAPE on every shared TU.
 Fix against it, then re-verify server.dll -- never the other way round. See
-guides/09-codegen-patterns.md ("the inliner is forward-only").
+guides/09_codegen_patterns.md ("the inliner is forward-only").
 
 A row here is a claim about our source, not about the shipped image: both
 addresses are real functions and one of our objects reproduces one of them.

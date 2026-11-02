@@ -6,7 +6,7 @@ worth not repeating. It is the lookup table you reach for when a function is
 instruction-equivalent but a few bytes off, and the reference you read before
 writing a new one so you get the shape right first time.
 
-[03-reading-disassembly](03-reading-disassembly.md) teaches you to read VC6
+[03-reading-disassembly](03_reading_disassembly.md) teaches you to read VC6
 codegen at all. This file is the accumulated case law: the patterns that are
 *not* obvious. The first half is ordered by what you see in the disassembly
 (control flow, loops, the frame, arithmetic, floating point, classes, calls);
@@ -507,7 +507,7 @@ invisible until a function reaches a sibling method through `this` — and then
 every slot is wrong at once. Derive the layout from the binary (`ret N` arg
 counts plus error-tag strings, `tools/vtabmap.py`) and cross-check against the
 header; where an SDK header is from a later era than the binary, the binary
-wins. See [07-vtables](07-vtables.md).
+wins. See [07-vtables](07_vtables.md).
 
 **Every `ILTMath` / `ILTCommon` / `ILTModel` slot returns `LTRESULT`, not
 `void`.** The two bytes of `xor eax,eax` are the tell.
@@ -720,7 +720,7 @@ Three cautions, all learned the hard way:
   shipped address it names can belong to a different function — or to one we
   never wrote. Verify the pairing from the shipped disassembly before changing
   any source; see
-  [10-upgrading-nears](10-upgrading-nears.md).
+  [10-upgrading-nears](10_upgrading_nears.md).
 
 ---
 
@@ -1903,7 +1903,7 @@ counts divisions. Two consequences worth having:
     a stray belonging to the one you are reading.
 
 The pool remains a statement-order witness (see
-[11-large-functions](11-large-functions.md)), but its dead
+[11-large-functions](11_large_functions.md)), but its dead
 entries are now readable too rather than being noise to be apologised for.
 
 ## The dividing line: ORDERING is source-reachable, ALLOCATION is not
@@ -2084,6 +2084,177 @@ need not compile alike -- the shipped bytes for the second copy the NRV temp
 into a second slot before MatMul reads it. That is a `.cpp` edit, in ORDERING
 territory, and it is source-reachable where the header is not.
 
+### The per-function inline budget, and what it leaves behind
+
+The caller-context rule above has a measurable shape. Found while matching
+talon's Processor (AvP2, cl 8966 `/O2`) and checked with throwaway files.
+
+**The budget grows with the caller and is spent top-down.** A function made
+of N identical `LTVector::Dot` calls expands 18 of 24, 22 of 32, 32 of 48 and
+43 of 64. The ones left as calls are always the LAST in source order. A
+three-line function expands all of them. So the same `_CVector` constructor,
+`MagSqr`, `Dot` or `Norm` gets expanded early in a big function and called
+late in it. When ours expands a site that the shipped code calls, or the
+other way round, the source spent its budget differently before that site.
+It is almost never the header. The two levers that have worked: how many
+helper levels the source goes through (`Append` -> `AddTail` -> `AddHead` is
+one level more than `AddTail`, and that level decided whether `AddHead` was
+expanded), and where in the function the expensive expansions sit.
+
+**An explicit destructor call that misses the budget becomes `??_G(0)`.**
+`p->~T()` (a `FreePoly`/`DeletePoly` template, or a hand-written one) is
+lowered through the scalar deleting destructor. With budget left, that
+wrapper is expanded and you see `call ??1T` (or the destructor's own body).
+Without budget, the wrapper itself stays a call:
+
+    push 0
+    mov  ecx, esi
+    call T::`scalar deleting destructor'
+    push esi
+    call free
+
+This happens with a class that has NO vtable at all. A direct `call ??_G`
+with 0 in the shipped code is a budget fact, not a virtual destructor, and no
+spelling of the destructor call reproduces it in a small function (eleven
+were tried).
+
+**A local array in the frame turns tail-recursion elimination off.** VC6
+rewrites `f(a, b); }` as a jump to the top with the parameter slots
+overwritten (`mov eax, [esp+param]` ... `jmp top`), but not when the function
+has any local array, even one whose address is never taken. Separate scalar
+locals let it through. If a shipped function with such an array jumps back to
+its top through its own parameter slots, the source was a hand-written loop:
+
+    for(;;)
+    {
+        ...
+        if(sides[BackSide])
+        {
+            if(leaf)                 ...
+            else if(sides[FrontSide]) Clip(pBrush, sides[BackSide], pNode->m_Sides[BackSide]);
+            else { pPoly = sides[BackSide]; pNode = pNode->m_Sides[BackSide]; continue; }
+        }
+        if(!sides[FrontSide] || leaf) return;
+        pPoly = sides[FrontSide]; pNode = pNode->m_Sides[FrontSide];
+    }
+
+That took talon's `ClipPoly` from 709 against 787 bytes to size-exact.
+
+**The declaration-count threshold, measured.** Bringing talon's BspGen back
+to 2001 added about nine member and method declarations to headers that
+BrushToWorld.cpp also includes. One of BrushToWorld's static destructors (an
+inlined `CMoArray` destructor, nothing to do with the new declarations)
+flipped the operand order of one `add`, and the scorer then placed it at
+another module's identical destructor. Adding dummy declarations to the
+reverted headers placed the flip between +6 and +9. Deleting three Build 69
+inline helpers nothing compiled used (CPrePoly's `CalcCenter`,
+`CalcExtents`, `OverlapExtents`) brought it back. So after any header edit,
+re-check every module already matched against the image, not only the one
+being worked on. When a match flips with no source change of its own, count
+declarations before suspecting anything else. (Worked out below, "The declaration count
+is a symbol count, mod 64": a change can be weighed and paid for.)
+
+**Which end of the function loses.** In the experiment above the calls left
+out of line were the LAST ones. The inline-budget bullet under "Levers that
+closed register allocation verdicts" says the EARLIEST sites are refused.
+Both are observations from real code. Until a case settles it, take the
+order as unknown and try both directions.
+
+## The declaration count is a symbol count, mod 64
+
+Measured on talon's Processor.exe (cl 12.00.8966 /O2), 2026-10-28, about
+four hundred builds. It explains the two "threshold" notes above (the
+BspGen one and tcpdriver's `HandleConnPacket`) and replaces their advice
+("count declarations") with a rule that can be calculated.
+
+**What flips.** Always code the inliner expanded from a template or an
+implicit member: the operand order of `m_nElements + m_Cache.GetCacheSize()`
+in an inlined `CMoArray` destructor (`_$E216`, `g_NodeStack`'s static
+destructor in PreWorld.obj), the two frame slots of that sum
+(`MakeWorldPVS`, 0x43f428), a register choice (`DoProcessing`,
+`BrushToWorld`, `FixTJunctions`). Never the function's own statements.
+
+**What is counted: the symbols the front end makes**, in units:
+
+| declaration | units |
+|---|---|
+| `#define`, a comment, the length of any name (10, 200, 1000 chars) | 0 |
+| `typedef`, `extern int v;`, `static const int k = 1;`, a new `class X;` | 1 |
+| a forward declaration of a class already declared | 0 |
+| a function declaration, `void f(...)` | 1 + 1 per parameter, **every time**: a redeclaration counts again; parameter names and the return type don't matter |
+| an inline function definition | 2 + 1 per parameter |
+| `enum E { A, B };` | 1 + 1 per enumerator |
+| a class definition, `class C {};` | 8, + 1 per data member, + each member function as above |
+
+Two inline constructors (`C() {}` and `C(const P *p) : m_a(p->x), m_b(p->y) {}`)
+came to 7: 2 + 3, and 1 per member initializer, it seems (not measured on
+its own). Units ADD: the light groups (47, measured alone), CheckNodes (2,
+measured) and four members the table puts at 2 + 2 + 1 + 1 measured 55
+together, and 57 with one more of 2.
+
+**Modulo 64.** Adding 64 typedefs (or 128, or 63 one-unit declarations
+and a typedef) to a header changes nothing anywhere; 32 does. Each
+sensitive function has a fixed set of good residues: `_$E216` is right
+for -11..+3 units, MakeWorldPVS and DoProcessing together for -2..+4, +6,
++31..+36 and +46..+49. Three-unit steps in front of `g_NodeStack` show the
+cycle directly: `_$E216` is right at 0..1 steps, 62..64, 82..86, 104..106
+and 126..128, and wrong in between -- 64/3 steps a cycle.
+
+**Before what.** Only the units made before the point where the inlined
+function is first NEEDED in the translation unit, its first use, which is
+not the function being compiled. Six units in front of `g_NodeStack`
+(PreWorld.cpp line 31) flip `_$E216`; twelve just after it (line 33)
+change nothing. MakeWorldPVS's inlined `~CHullInfo` is first needed
+by BuildWorldHulls, thirty lines earlier: five typedefs anywhere up to
+BuildWorldHulls flip MakeWorldPVS, five after it don't, though
+MakeWorldPVS itself starts lower down. A header change therefore counts in
+every file that includes the header before that first use, and in no
+other: `BrushToWorld.cpp` and `TJunctions.cpp` include PreWorld.h but not
+PreLeaf.h, so the two headers are separate accounts.
+
+(Our guess at the mechanism, not measured: the back end orders or hashes
+by symbol number in a 64-way table, so a template's symbols, numbered when
+it is first instantiated, move against the fixed ones of the classes
+declared earlier.)
+
+**How to weigh a change, cheaply.** Build only the objects that hold
+sensitive functions (four here, 9 s a build), compare each with a
+baseline build by symbol (`tools/objdiff.py`), and record which functions
+differ:
+
+ 1. a reference: 1..64 typedefs at one fixed place in the header (64
+    builds); each n gives a set of flipped functions, its signature;
+ 2. a change's weight mod 64 is the n whose signature its build has. A
+    signature is usually shared by several n, so build the change three
+    times, plus 0, 17 and 40 typedefs, and intersect.
+
+Then pay for it in the same header (an equal and opposite number of units,
+or 64 minus it), so that every file sees the same count mod 64 as before.
+Ways that are legitimate, in order of preference: delete what Build 69
+declares and 2001 cannot have (Jupiter's light groups were 47 units; a
+member function nothing defines or calls is 1 + its parameters); move a
+declaration to the header of the file that defines it, out of the files
+that don't use it; delete a declaration of something that no longer
+exists. Dummies only as a measuring tool.
+
+Worked, Processor.exe: CPrePolyRef as a POD (-7) paid with 57 units of
+Build 69 declarations nothing used; CPreLeaf's 0x6c as a class of its own
+(+21 in PreWorld.cpp and Processing.cpp) paid by moving the portal
+functions to LeafPortals.h and FindObjectLeaf/FindInsideLeaf to
+PreGeometry.h (which PreWorld.cpp includes and Processing.cpp doesn't, so
+the two files each landed in a good window, not on zero). Four
+functions identical, none lost.
+
+**A second, link-level effect, in the scorer.** Identical tiny functions
+(an empty `ret`) are folded by the linker's /OPT:ICF and the map names
+the group under the object whose copy it kept. Which object that is
+changes with any function added to or removed from the link (one
+unreferenced function in Terrain.cpp moved both groups), and the scorer
+pairs functions by `object:symbol`: when it places by shape a copy the
+link dropped, the function cannot be verified and a recorded identical
+(0x42dd40) reads `small`, with no byte of code changed. progress.py now
+tries the copies our map names first.
+
 ## Two rules that do NOT hold everywhere -- check before applying
 
 Both are easy to state as general rules, and both were refuted by measurement
@@ -2254,13 +2425,13 @@ The recurring shapes, all catalogued and none source-reachable:
   * which register holds `this` (`%ebx` against `%ebp` is the common pair);
   * scale-1 SIB base/index order (`X(%ecx,%eax,1)` against `X(%eax,%ecx,1)`),
     already a recorded negative here and in
-    [10-upgrading-nears](10-upgrading-nears.md).
+    [10-upgrading-nears](10_upgrading_nears.md).
 
 One shape in that sample WAS source-reachable and is worth knowing: at
 lmsg_AfterRead (0x10014cf8) the shipped build loads the two members in the
 opposite order to ours before subtracting them, computing the same value with
 the registers swapped. That is operand-evaluation order, and hoisting one
-operand into a local is the lever ([12-o2-shape](12-o2-shape.md)).
+operand into a local is the lever ([12-o2-shape](12_o2_shape.md)).
 
 The practical conclusion: the near bucket is close to exhausted by source-level
 work -- though see the last section for the levers that did close some.
@@ -2332,7 +2503,8 @@ these was a source difference; none was the compiler's whim.
   earlier in the function. Padding reproduces it; the real ones are unknown.
 * **A header symbol-count threshold.** tcpdriver.cpp's `HandleConnPacket` flips
   on ANY added declaration in lthread.h/servermgr.h, used or not. Count
-  declarations when a header change costs it; removing dead ones compensates.
+  declarations when a header change costs it; removing dead ones compensates
+  (how many: "The declaration count is a symbol count, mod 64").
 * **Loop shape from returns inside the loop.** `if (++j >= 8) return 1;` gives
   the shipped `cmp; jae <return>; jmp top` tail; `for (j...)` never rotates.
 * **`*(volatile float*)&x` at one read site** forces the store+reload shipped

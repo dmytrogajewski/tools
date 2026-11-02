@@ -1,6 +1,6 @@
 # 06 · A worked example (engine binary)
 
-[04-worked-example](04-worked-example.md) matched a library function where we
+[04-worked-example](04_worked_example.md) matched a library function where we
 had symbols and era source. This one is the hard case and the one you'll
 actually repeat: a function inside **server.dll** — no symbols, no
 relocations, no source.
@@ -258,7 +258,7 @@ python3 tools/progress.py --todo=server.dll | sort -k3 -n | head
 
 `tools/tagmap.py ... --undone` lists the functions an error-tag literal names
 that are not reconstructed yet. Read
-[03-reading-disassembly](03-reading-disassembly.md) for the general idiom
-dictionary, [07-vtables](07-vtables.md) to name functions that have no tag,
-and [08-worked-example-playsound](08-worked-example-playsound.md) for a large
+[03-reading-disassembly](03_reading_disassembly.md) for the general idiom
+dictionary, [07-vtables](07_vtables.md) to name functions that have no tag,
+and [08-worked-example-playsound](08_worked_example_playsound.md) for a large
 function taken all the way to byte identity.

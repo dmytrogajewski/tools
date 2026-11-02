@@ -67,6 +67,11 @@ PRODUCT = {
     # link
     0x1c: "cl 13.00 C (Utc13_C)",
     0x1d: "cl 13.00 C++ (Utc13_CPP)",
+    # VC6 SP5 with the Processor Pack (back end c2.dll 13.00.9044,
+    # toolchains/msvc-6.00-9044): build 9044. Here, the AvP2 "Talon"
+    # DEdit and ModelEdit (lithtools); checked by compiling with it
+    0x30: "cl 12.00 + Processor Pack C (Utc12_2_C)",
+    0x31: "cl 12.00 + Processor Pack C++ (Utc12_2_CPP)",
     # The VC .NET 2003 generation (13.10/7.10). Here, every Monolith binary
     # of Contract J.A.C.K.: cl 13.10.3077 C and C++, link 7.10.3077, cvtres
     # 7.10.3052. The 0x5d rows at builds 2067 and 2179 come in with

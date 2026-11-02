@@ -6,7 +6,7 @@ One function, start to finish: `CRegMgr::SetSubKey` from `RegMgr.lib`. It's
 ## 1 · Extract the shipped library and pick the function
 
 The retail library comes from the *NOLF Source Code v1.003* release, mounted
-into `make shell` as [02-the-loop](02-the-loop.md#the-library-loop-symbols-available)
+into `make shell` as [02-the-loop](02_the_loop.md#the-library-loop-symbols-available)
 describes (`$LIBS` is its `LT2/lithshared/libs/Release`). `dumpfn.py` needs `objdump` (binutils).
 
 ```sh
@@ -116,12 +116,12 @@ diff out/ours.txt out/theirs.txt
 Two extra bytes on a bool return usually means you wrote `return CreateKey(...)`
 (a direct return of the call's value, no normalization) where shipped wrote the
 `if/else return TRUE/FALSE` form, or vice versa — see the boolean idioms in
-[03-reading-disassembly](03-reading-disassembly.md#comparisons-and-booleans).
+[03-reading-disassembly](03_reading_disassembly.md#comparisons-and-booleans).
 Change the source, recompile, re-diff. Each round changes exactly what you
 predicted, or you misread the idiom — never shotgun edits.
 
 ## The takeaway
 
 Every function is this loop. The skill is step 2 — reading the codegen back to
-source — and that's just fluency with [03-reading-disassembly](03-reading-disassembly.md),
+source — and that's just fluency with [03-reading-disassembly](03_reading_disassembly.md),
 built one function at a time.

@@ -157,8 +157,8 @@ Which list to work from depends on the kind of work:
 
 | You want to | Start from | Guide |
 |---|---|---|
-| close functions that are almost right | `--nears`, smallest delta first | [10-upgrading-nears](10-upgrading-nears.md) |
-| write something new | `--todo`, a small function that opens a cluster | [README](README.md#picking-a-target), [13-cluster-recon](13-cluster-recon.md) |
+| close functions that are almost right | `--nears`, smallest delta first | [10-upgrading-nears](10_upgrading_nears.md) |
+| write something new | `--todo`, a small function that opens a cluster | [README](README.md#picking-a-target), [13-cluster-recon](13_cluster_recon.md) |
 | fix coverage | `--unplaced` and `--todo` of the same target, side by side | below |
 
 The two coverage counts, per target in the README:

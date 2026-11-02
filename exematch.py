@@ -19,8 +19,12 @@ import tempfile, glob, os  # noqa: E402
 from libextract import extract  # noqa: E402
 
 
-def parse_obj_masked(data):
-    """Like objdiff.parse_obj but returns (code, maskset) per function."""
+def parse_obj_masked(data, kinds=None):
+    """Like objdiff.parse_obj but returns (code, maskset) per function.
+
+    kinds, a dict, is filled with each function's relocations as
+    {name: {offset: COFF relocation type}} (6 DIR32, 7 DIR32NB, 0x14
+    REL32, ...), for a caller that has to know what each masked dword is."""
     if len(data) < 20:
         return {}
     machine, nsec, _ts, symoff, nsyms, optsz, _ch = struct.unpack_from("<HHIIIHH", data, 0)
@@ -58,9 +62,11 @@ def parse_obj_masked(data):
             continue
         code = data[rawp : rawp + rawsz]
         masks = set()
+        rtype = {}
         for r in range(nrel):
             va = struct.unpack_from("<I", data, relp + r * 10)[0]
             masks.update(range(va, min(va + 4, rawsz)))
+            rtype[va] = struct.unpack_from("<H", data, relp + r * 10 + 8)[0]
         fsyms = sorted(
             (v, n) for n, v, sn, typ, st in syms
             if sn == si and st in (2, 3) and typ == 0x20)
@@ -71,6 +77,9 @@ def parse_obj_masked(data):
                 fcode = fcode[:-1]
             fmask = {m - v for m in masks if v <= m < v + len(fcode)}
             out[n] = (fcode, fmask)
+            if kinds is not None:
+                kinds[n] = {o - v: t for o, t in rtype.items()
+                            if v <= o < v + len(fcode)}
     return out
 
 

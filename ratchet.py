@@ -15,7 +15,10 @@ progress/ -- the list of every function already byte-identical
       with a reminder to record them. --covered also fails unless every
       target has no unwritten and no unplaced function (full coverage:
       everything written and placed, near or identical); --complete
-      unless every scored function is identical: the finish line.
+      unless every scored function is identical as well (it implies
+      --covered: an identical score with written functions still unplaced
+      is not the finish line). Neither is whole-image identity: that is
+      tools/buildcmp.py's, against the retail image.
   ratchet.py update [--accept-losses]
       Records the run as the new baseline and rewrites README.md's table.
       Refuses a run that lost a recorded function unless --accept-losses
@@ -53,14 +56,20 @@ import targets as cfg  # noqa: E402
 # The README's rows, in progress/targets.py's order: (label, what it is, the
 # targets it adds up). Libraries scored on their own (cfg.LIBS) share one
 # row.
-ROWS = [("`%s`" % t["label"], t["what"], [t["label"]])
+def _cell(text):
+    """Text for a table cell: a bare | would start a new column
+    ("Softimage|3D" shifted the rest of its row), so it is escaped."""
+    return text.replace("|", "\\|")
+
+
+ROWS = [(_cell("`%s`" % t["label"]), _cell(t["what"]), [t["label"]])
         for t in cfg.TARGETS if t["kind"] != "resources"]
 if cfg.LIBS:
     ROWS.append(("libraries", "the shared libraries", [l for l, _p in cfg.LIBS]))
 # Rows listed after ROWS but left out of the total: resource-only images,
 # scored resource by resource (tools/progress.py, rows_for_resources). Their
 # data is not code, so it is not added to the total.
-RES_ROWS = [("`%s`" % t["label"], t["what"], [t["label"]])
+RES_ROWS = [(_cell("`%s`" % t["label"]), _cell(t["what"]), [t["label"]])
             for t in cfg.TARGETS if t["kind"] == "resources"]
 # what names the shipped libraries' directory, for the messages below
 LIBS_ENV = cfg.SHIPPED_ENV or "the shipped libraries' variable"
@@ -115,7 +124,7 @@ def render(summary):
     tot = {"identical": 0, "funcs": 0, "bytes_identical": 0, "bytes_total": 0,
            "unwritten": 0, "unplaced": 0}
     for label, what, names in ROWS:
-        agg = {k: sum(t[n].get(k, 0) for n in names) for k in tot}
+        agg = {k: sum(t.get(n, {}).get(k, 0) for n in names) for k in tot}
         for k in tot:
             tot[k] += agg[k]
         out.append(
@@ -125,7 +134,7 @@ def render(summary):
             f"{pct_floor(agg['bytes_identical'], agg['bytes_total'])}% | "
             f"{agg['unwritten']:,} | {agg['unplaced']:,} |")
     for label, what, names in RES_ROWS:
-        agg = {k: sum(t[n].get(k, 0) for n in names) for k in tot}
+        agg = {k: sum(t.get(n, {}).get(k, 0) for n in names) for k in tot}
         if not agg["funcs"]:                # an empty resource directory
             out.append(f"| {label} | {what}, not in the total | no "
                        f"resources | -- | -- | -- | -- |")
@@ -301,7 +310,8 @@ def main():
     args = sys.argv[1:]
     cmd = args[0] if args else ""
     if cmd == "check":
-        sys.exit(cmd_check("--complete" in args, "--covered" in args))
+        sys.exit(cmd_check("--complete" in args,
+                           "--covered" in args or "--complete" in args))
     if cmd == "update":
         sys.exit(cmd_update("--accept-losses" in args))
     if cmd == "readme":

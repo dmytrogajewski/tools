@@ -14,23 +14,51 @@ the image, it walks the object's relocations, and where one points at a
 read-only constant in our object it reads the matching address out of the
 shipped image and compares the constant itself.
 
+A relocation counts only when the instruction that owns it, decoded from
+the function's entry (x86len.py), is an x87 read of a float or double
+from memory. Reading the opcode from the two bytes in front of the field
+mistook the `dd d8` of an `fstp st(0)` for one, ahead of a `mov esi,
+imm32`. Exits 1 on a mismatch.
+
 Usage:
   fpconst.py <image> <obj|dir>...            e.g.
   fpconst.py out/reference/server.dll src/engine/server/Release
+  fpconst.py --targets      every built image target in progress/targets.py
+                            (its link's objects): `make progress` runs this
 """
 import glob
 import os
 import struct
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exematch import parse_obj_masked, find  # noqa: E402
 from exedump import Pe  # noqa: E402
+from x86len import walk  # noqa: E402
+from libextract import extract  # noqa: E402
 
-# x87 loads whose operand width we can state from the opcode alone. The
-# modrm byte's reg field selects the operation; only the width matters here.
-W4 = {0xD8, 0xD9}          # fadds/fsubs/fmuls/fdivs/fcomps/flds  -> dword
-W8 = {0xDC, 0xDD}          # faddl/.../fldl/fcompl                -> qword
+DIR32 = 6
+
+
+def x87_width(ins):
+    """The bytes an x87 instruction reads from memory as a float operand,
+    or 0 if it reads none (a store, a control word, an integer, a register).
+
+    D8 /r: fadd..fdivr m32real;  D9 /0: fld m32real
+    DC /r: fadd..fdivr m64real;  DD /0: fld m64real
+    """
+    if ins.mod is None or ins.mod == 3:
+        return 0
+    if ins.op == 0xD8:
+        return 4
+    if ins.op == 0xDC:
+        return 8
+    if ins.op == 0xD9 and ins.reg == 0:
+        return 4
+    if ins.op == 0xDD and ins.reg == 0:
+        return 8
+    return 0
 
 
 def sections(data):
@@ -93,10 +121,9 @@ def func_syms(data, secs, symoff, nsyms):
     return out
 
 
-def main():
-    if len(sys.argv) < 3:
-        sys.exit(__doc__)
-    pe = Pe(sys.argv[1])
+def check(image, objs, out=sys.stdout):
+    """(operands checked, mismatched, unknown) for our objects in image."""
+    pe = Pe(image)
     tva, tvs, trp = pe.secs[".text"]
     text = pe.d[trp:trp + tvs]
 
@@ -107,13 +134,12 @@ def main():
                 return pe.d[o:o + n]
         return None
 
-    objs = []
-    for a in sys.argv[2:]:
-        objs += sorted(glob.glob(os.path.join(a, "*.obj"))) if os.path.isdir(a) else [a]
-
-    checked = bad = 0
+    checked = bad = unknown = 0
     for path in objs:
-        data = open(path, "rb").read()
+        if isinstance(path, tuple):         # (name, bytes): a library member
+            path, data = path
+        else:
+            data = open(path, "rb").read()
         try:
             fns = parse_obj_masked(data)
             secs, symoff, nsyms = sections(data)
@@ -135,15 +161,32 @@ def main():
             if len(hits) != 1:
                 continue                     # ambiguous or absent: not ours to judge
             base = hits[0]
-            for vaddr, symidx, _typ in relbysec.get(si, []):
+            # each relocation is judged by the instruction that owns it: the
+            # function is decoded from its entry, and only a DIR32 that is
+            # the whole 4-byte displacement of an x87 memory read counts.
+            # The relocations past the first byte the decoder cannot read
+            # are counted as unknown, not passed.
+            owner = {}
+            decoded_to = 0
+            for ins in walk(code):
+                decoded_to = ins.off + ins.length
+                if ins.disp_off is not None and ins.disp_len == 4:
+                    owner[ins.disp_off] = ins
+            for vaddr, symidx, typ in relbysec.get(si, []):
                 fn_off = vaddr - symval
                 if not (0 <= fn_off < len(code)) or fn_off not in mask:
                     continue
-                op = code[fn_off - 2] if fn_off >= 2 else 0
-                width = 4 if op in W4 else 8 if op in W8 else 0
-                if not width:
+                ins = owner.get(fn_off)
+                if ins is None:
+                    if fn_off >= decoded_to:
+                        unknown += 1
                     continue
-                ours = const_at(data, secs, symoff, nsyms, symidx, 0, width)
+                width = x87_width(ins)
+                if not width or typ != DIR32:
+                    continue
+                # a DIR32's addend is the field's own content in the object
+                addend = struct.unpack_from("<i", code, fn_off)[0]
+                ours = const_at(data, secs, symoff, nsyms, symidx, addend, width)
                 if ours is None:
                     continue
                 va = struct.unpack_from("<I", text, base - tva + fn_off)[0]
@@ -154,12 +197,60 @@ def main():
                 if ours != theirs:
                     bad += 1
                     f = "<f" if width == 4 else "<d"
-                    print(f"MISMATCH {os.path.basename(path)} {sym}")
+                    print(f"MISMATCH {os.path.basename(path)} {sym}", file=out)
                     print(f"    +0x{fn_off:x} operand at 0x{va:08x}: "
                           f"ours {struct.unpack(f, ours)[0]!r} "
-                          f"ship {struct.unpack(f, theirs)[0]!r}")
-    print(f"\n{checked} floating-point operand(s) behind masked relocations "
-          f"checked, {bad} mismatched")
+                          f"ship {struct.unpack(f, theirs)[0]!r}", file=out)
+    return checked, bad, unknown
+
+
+def summary(checked, bad, unknown):
+    return (f"{checked} floating-point operand(s) behind masked relocations "
+            f"checked, {bad} mismatched"
+            + (f"; {unknown} relocation(s) past code the decoder could not "
+               f"read, unchecked" if unknown else ""))
+
+
+def check_targets():
+    """Every built image target of progress/targets.py, its link's objects
+    against its shipped image: what `make progress` runs."""
+    import tgt as tgt_mod
+    os.chdir(tgt_mod.REPO)
+    bad_total = 0
+    for t in tgt_mod.cfg.TARGETS:
+        if t.get("kind") != "image" or not tgt_mod.built(t):
+            continue
+        objs = []
+        for o in tgt_mod.progress.image_objs(t, tgt_mod.built(t)):
+            if o.lower().endswith(".obj"):
+                objs.append(o)
+            elif o.lower().endswith(".lib"):
+                # a library of ours is checked member by member
+                with tempfile.TemporaryDirectory() as td:
+                    extract(o, td)
+                    objs += [(os.path.basename(m), open(m, "rb").read())
+                             for m in sorted(glob.glob(td + "/*"))]
+        if not objs:
+            continue
+        shipped = t["shipped"]
+        if t.get("readable") and os.path.exists(t["readable"]):
+            shipped = t["readable"]
+        checked, bad, unknown = check(shipped, objs)
+        bad_total += bad
+        print(f"  {t['label']}: " + summary(checked, bad, unknown))
+    return 1 if bad_total else 0
+
+
+def main():
+    if sys.argv[1:] == ["--targets"]:
+        return check_targets()
+    if len(sys.argv) < 3:
+        sys.exit(__doc__)
+    objs = []
+    for a in sys.argv[2:]:
+        objs += sorted(glob.glob(os.path.join(a, "*.obj"))) if os.path.isdir(a) else [a]
+    checked, bad, unknown = check(sys.argv[1], objs)
+    print("\n" + summary(checked, bad, unknown))
     return 1 if bad else 0
 
 
