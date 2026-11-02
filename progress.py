@@ -2312,8 +2312,10 @@ def whole_image_identical(tgt, ours):
     from buildcmp import norm_pe
     if tgt.get("readable") or tgt.get("encrypted"):
         return False
-    a = bytearray(open(os.path.join(REPO, tgt["shipped"]), "rb").read())
-    b = bytearray(open(os.path.join(REPO, ours), "rb").read())
+    with open(os.path.join(REPO, tgt["shipped"]), "rb") as f:
+        a = bytearray(f.read())
+    with open(os.path.join(REPO, ours), "rb") as f:
+        b = bytearray(f.read())
     if len(a) != len(b):
         return False
     norm_pe(a)

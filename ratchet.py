@@ -124,7 +124,7 @@ def render(summary):
     tot = {"identical": 0, "funcs": 0, "bytes_identical": 0, "bytes_total": 0,
            "unwritten": 0, "unplaced": 0}
     for label, what, names in ROWS:
-        agg = {k: sum(t[n].get(k, 0) for n in names) for k in tot}
+        agg = {k: sum(t.get(n, {}).get(k, 0) for n in names) for k in tot}
         for k in tot:
             tot[k] += agg[k]
         out.append(
@@ -134,7 +134,7 @@ def render(summary):
             f"{pct_floor(agg['bytes_identical'], agg['bytes_total'])}% | "
             f"{agg['unwritten']:,} | {agg['unplaced']:,} |")
     for label, what, names in RES_ROWS:
-        agg = {k: sum(t[n].get(k, 0) for n in names) for k in tot}
+        agg = {k: sum(t.get(n, {}).get(k, 0) for n in names) for k in tot}
         if not agg["funcs"]:                # an empty resource directory
             out.append(f"| {label} | {what}, not in the total | no "
                        f"resources | -- | -- | -- | -- |")

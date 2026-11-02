@@ -61,7 +61,8 @@ REFERENCE = "out/reference"
 def images():
     """[(label, retail image, ours)]: every image progress/targets.py names
     that the build has made, once each (an image's `:rsrc` target shares
-    it), labelled by the retail file's name."""
+    it), labelled by its target's label without the `:rsrc` (two targets
+    can ship files of the same name: talon's two Processor.exe)."""
     import tgt as tgt_mod
     out, seen = [], set()
     for t in tgt_mod.cfg.TARGETS:
@@ -72,7 +73,7 @@ def images():
         if not ours:
             continue
         seen.add(ref)
-        out.append((os.path.basename(ref), ref, ours))
+        out.append((re.sub(r":rsrc$", "", t["label"]), ref, ours))
     return out
 
 
