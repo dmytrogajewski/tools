@@ -73,11 +73,18 @@ def main():
     ev = {"source": {}, "reference": {}, "config": {}, "build": {},
           "toolchains": {}, "result": {}}
 
-    head = git("rev-parse", "HEAD")
+    # (in a container the repository's .git may not be there -- talon is a
+    # directory of lithtools: the host passes what it knows as
+    # EVIDENCE_REVISION, EVIDENCE_MODIFIED and EVIDENCE_SUBMODULES)
+    head = git("rev-parse", "HEAD") or os.environ.get("EVIDENCE_REVISION")
     dirty = git("status", "--porcelain", "--untracked-files=no")
     ev["source"]["revision"] = head
-    ev["source"]["modified_files"] = len(dirty.splitlines()) if dirty else 0
-    subs = git("submodule", "status") or ""
+    if dirty is not None:
+        ev["source"]["modified_files"] = len(dirty.splitlines()) if dirty else 0
+    elif os.environ.get("EVIDENCE_MODIFIED", "").isdigit():
+        ev["source"]["modified_files"] = int(os.environ["EVIDENCE_MODIFIED"])
+    subs = git("submodule", "status") or \
+        os.environ.get("EVIDENCE_SUBMODULES", "").replace(";", "\n")
     for line in subs.splitlines():
         parts = line.strip().lstrip("+-U").split()
         if len(parts) >= 2:
