@@ -6,7 +6,8 @@ masked) and resources; neither reads the rest of an image's data. This
 reads it: per image, the text in every section that is neither code nor
 .reloc nor .rsrc (the resources are scored resource by resource), with the
 import and export tables read as what they are -- "import KERNEL32.dll
-GetTickCount", "export name server.DLL" -- rather than as bytes, and
+GetTickCount", "export name server.DLL", "export CreateServer @1" -- rather
+than as bytes, and
 compares the two images' text as multisets: a string the retail image holds
 and ours does not is a "retail" difference, one only ours holds an "ours"
 difference.
@@ -119,12 +120,22 @@ class Image:
         if rva and size:
             o = self.off(rva)
             spans.append((o, o + size))
-            name, _base, nfun, nnames, _af, an, _ao = struct.unpack_from(
+            name, base, nfun, nnames, af, an, ao = struct.unpack_from(
                 "<IIIIIII", self.d, o + 12)
             out.append("export name " + self.cstr(name))
+            # each name with its ordinal (a module importing by ordinal
+            # binds to the number, not the name), and the ordinals that
+            # export something without a name
+            named = set()
             for i in range(nnames):
-                out.append("export " + self.cstr(struct.unpack_from(
-                    "<I", self.d, self.off(an) + 4 * i)[0]))
+                idx = struct.unpack_from("<H", self.d, self.off(ao) + 2 * i)[0]
+                named.add(idx)
+                out.append("export %s @%d" % (self.cstr(struct.unpack_from(
+                    "<I", self.d, self.off(an) + 4 * i)[0]), base + idx))
+            for idx in range(nfun):
+                if idx not in named and struct.unpack_from(
+                        "<I", self.d, self.off(af) + 4 * idx)[0]:
+                    out.append("export @%d" % (base + idx))
         rva, size = self.dirs[1]                      # imports
         if rva:
             o = self.off(rva)
